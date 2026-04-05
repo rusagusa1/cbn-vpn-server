@@ -1,9 +1,8 @@
 import sqlite3
 import urllib.request
-import base64
 import threading
 import time
-from flask import Flask, Response, request, redirect
+from flask import Flask, request, redirect
 
 app = Flask(__name__)
 
@@ -14,40 +13,9 @@ VPN_CONFIG_URL = (
 OBHOD_CONFIG_URL = (
     "https://cdn.jsdelivr.net/gh/igareck/vpn-configs-for-russia@main/Vless-Reality-White-Lists-Rus-Mobile.txt"
 )
-_cache = {}
-_cache_ready = False  # True когда оба конфига уже загружены при старте
-
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"  # ⚠️ замени на свой URL после деплоя
 SECRET_KEY = "cbn_secret_2026"                        # ⚠️ одинаковый в боте и сервере
 ADMIN_ID = 1448623020
-
-
-def fetch_config(url: str) -> str:
-    """Возвращает конфиг из кэша или скачивает его."""
-    if url in _cache:
-        return _cache[url]
-    try:
-        with urllib.request.urlopen(url, timeout=15) as r:
-            raw = r.read()
-        content = base64.b64encode(raw).decode("utf-8")
-        _cache[url] = content
-        return content
-    except Exception as e:
-        error_text = f"# Ошибка загрузки конфига: {e}"
-        return base64.b64encode(error_text.encode()).decode()
-
-
-def warm_cache():
-    """Загружает оба конфига сразу при старте в фоновом потоке."""
-    global _cache_ready
-    for url in (VPN_CONFIG_URL, OBHOD_CONFIG_URL):
-        try:
-            with urllib.request.urlopen(url, timeout=20) as r:
-                raw = r.read()
-            _cache[url] = base64.b64encode(raw).decode("utf-8")
-        except Exception:
-            pass  # при следующем запросе попробуем ещё раз
-    _cache_ready = True
 
 
 def keep_alive():
@@ -75,8 +43,6 @@ def init_db():
 
 
 init_db()
-# Запускаем прогрев кэша при любом способе запуска (gunicorn или python напрямую)
-threading.Thread(target=warm_cache, daemon=True).start()
 threading.Thread(target=keep_alive, daemon=True).start()
 
 
@@ -101,61 +67,29 @@ def is_premium_user(user_id: int) -> bool:
         return False
 
 
-def make_response(content: str, title: str) -> Response:
-    return Response(
-        content,
-        mimetype="text/plain; charset=utf-8",
-        headers={
-            "Content-Disposition": "inline",
-            "Cache-Control": "no-cache",
-            "profile-update-interval": "12",
-            "ngrok-skip-browser-warning": "true",
-            "profile-title": title,
-            "subscription-userinfo": "upload=0; download=0; total=0; expire=0",
-            "support-url": "https://t.me/cherniy_bez_nomerov",
-            "profile-web-page-url": "https://t.me/CBN_VPN",
-            "channel-url": "https://t.me/CBN_VPN",
-            "bot-url": "https://t.me/CBN_VPN",
-        }
-    )
-
-
 # ─── МАРШРУТЫ ─────────────────────────────────────────────
 
 @app.route('/<int:user_id>')
 def serve_vpn(user_id):
-    """Обычный VPN — для всех пользователей."""
-    # Если кэш ещё не прогрелся — редиректим напрямую на CDN (мгновенно)
-    if VPN_CONFIG_URL not in _cache:
-        return redirect(VPN_CONFIG_URL, code=302)
-    return make_response(_cache[VPN_CONFIG_URL], "CBN VPN")
+    """Обычный VPN — редирект напрямую на CDN."""
+    return redirect(VPN_CONFIG_URL, code=302)
 
 
 @app.route('/<int:user_id>/obs')
 def serve_obs(user_id):
-    """ОБС — только для премиум-пользователей."""
+    """ОБС — только для премиум, иначе обычный VPN."""
     if not is_premium_user(user_id):
-        url = VPN_CONFIG_URL
-        title = "CBN VPN (нет Премиума)"
-    else:
-        url = OBHOD_CONFIG_URL
-        title = "CBN VPN — ОБС (Премиум)"
-
-    # Если кэш ещё не прогрелся — редиректим напрямую на CDN
-    if url not in _cache:
-        return redirect(url, code=302)
-    return make_response(_cache[url], title)
+        return redirect(VPN_CONFIG_URL, code=302)
+    return redirect(OBHOD_CONFIG_URL, code=302)
 
 
 @app.route('/update/<int:user_id>')
 def force_update(user_id):
-    _cache.clear()
     return serve_vpn(user_id)
 
 
 @app.route('/update/<int:user_id>/obs')
 def force_update_obs(user_id):
-    _cache.clear()
     return serve_obs(user_id)
 
 
