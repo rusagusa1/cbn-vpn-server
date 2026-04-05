@@ -205,10 +205,22 @@ def serve_obs(user_id):
     if is_banned_user(user_id):
         return '', 200
     if not is_premium_user(user_id):
-        # Не премиум — редирект на обычный VPN
         return redirect(VPN_CONFIG_URL, code=302)
-    # Премиум — редирект напрямую на GitHub, быстро и без зависаний
-    return redirect(OBHOD_CONFIG_URL, code=302)
+    # Качаем напрямую с GitHub с коротким таймаутом и отдаём с заголовком
+    try:
+        data = _download(OBHOD_CONFIG_URL, timeout=10, retries=1)
+        return Response(
+            data,
+            status=200,
+            headers={
+                "Content-Type": "text/plain; charset=utf-8",
+                "profile-title": "CBN VPN Premium",
+                "Cache-Control": "no-cache",
+            }
+        )
+    except Exception:
+        # Не успели скачать — редирект как fallback (без названия, но работает)
+        return redirect(OBHOD_CONFIG_URL, code=302)
 
 
 # ─── ADMIN API ────────────────────────────────────────────
