@@ -53,43 +53,42 @@ def _warm_one(key: str, url: str):
 
 
 def get_config(key: str, url: str) -> bytes:
-    """Возвращает конфиг из кеша. Если кеш устарел — обновляет синхронно."""
+    """Возвращает конфиг из кеша. Если кеш устарел — обновляет синхронно.
+    Если скачать не удалось, но старый кеш есть — отдаёт старый."""
     with _cache_lock:
         entry = _cache[key]
-        if entry["data"] is not None and (time.time() - entry["updated_at"]) < CACHE_TTL:
-            return entry["data"]
+        cache_has_data = entry["data"] is not None
+        cache_fresh = cache_has_data and (time.time() - entry["updated_at"]) < CACHE_TTL
 
-    # Кеш устарел или пустой — скачиваем
-    data = _download(url)
-    with _cache_lock:
-        _cache[key]["data"] = data
-        _cache[key]["updated_at"] = time.time()
-    return data
+    if cache_fresh:
+        return entry["data"]
+
+    try:
+        data = _download(url)
+        with _cache_lock:
+            _cache[key]["data"] = data
+            _cache[key]["updated_at"] = time.time()
+        return data
+    except Exception as e:
+        with _cache_lock:
+            if _cache[key]["data"] is not None:
+                print(f"[cache] Используем старый кеш для {key}: {e}")
+                return _cache[key]["data"]
+        raise
 
 
 def _refresh_cache():
-    """Фоновый поток: прогревает кеш параллельно при старте, затем обновляет каждые 15 минут."""
-    # Параллельный прогрев при старте — VPN и ОБС качаются одновременно
-    threads = [
-        threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True),
-        threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True),
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    """Фоновый поток: запускает прогрев кеша в фоне (не блокирует старт),
+    затем обновляет каждые 15 минут."""
+    # Прогрев при старте — НЕ ждём, сервер поднимается сразу
+    threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True).start()
+    threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True).start()
 
     # Дальше — цикл обновления каждые 15 минут
     while True:
         time.sleep(CACHE_TTL)
-        threads = [
-            threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True),
-            threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True),
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True).start()
+        threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True).start()
 
 
 def keep_alive():
