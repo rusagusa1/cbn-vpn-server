@@ -20,13 +20,12 @@ ADMIN_ID = 1448623020
 
 def keep_alive():
     """Пингует сам себя каждые 10 минут чтобы Render не засыпал."""
-    time.sleep(60)
     while True:
+        time.sleep(600)
         try:
             urllib.request.urlopen(RENDER_URL + "/", timeout=10)
         except Exception:
             pass
-        time.sleep(600)
 
 
 def init_db():
@@ -36,8 +35,15 @@ def init_db():
         username TEXT,
         premium_expiry TEXT,
         is_premium INTEGER DEFAULT 0,
-        reg_date TEXT
+        reg_date TEXT,
+        is_banned INTEGER DEFAULT 0
     )""")
+    # Добавляем колонку is_banned если её нет (для старых БД)
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN is_banned INTEGER DEFAULT 0")
+        conn.commit()
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -52,6 +58,19 @@ def get_db():
     return conn
 
 
+def is_banned_user(user_id: int) -> bool:
+    """Проверяет, забанен ли пользователь."""
+    try:
+        conn = get_db()
+        row = conn.execute(
+            "SELECT is_banned FROM users WHERE user_id=?", (user_id,)
+        ).fetchone()
+        conn.close()
+        return bool(row and row["is_banned"] == 1)
+    except Exception:
+        return False
+
+
 def is_premium_user(user_id: int) -> bool:
     """Проверяет, является ли пользователь премиум."""
     if user_id == ADMIN_ID:
@@ -59,10 +78,14 @@ def is_premium_user(user_id: int) -> bool:
     try:
         conn = get_db()
         row = conn.execute(
-            "SELECT is_premium FROM users WHERE user_id=?", (user_id,)
+            "SELECT is_premium, is_banned FROM users WHERE user_id=?", (user_id,)
         ).fetchone()
         conn.close()
-        return bool(row and row["is_premium"] == 1)
+        if not row:
+            return False
+        if row["is_banned"] == 1:
+            return False
+        return bool(row["is_premium"] == 1)
     except Exception:
         return False
 
@@ -71,26 +94,20 @@ def is_premium_user(user_id: int) -> bool:
 
 @app.route('/<int:user_id>')
 def serve_vpn(user_id):
-    """Обычный VPN — редирект напрямую на CDN."""
+    """Обычный VPN — редирект напрямую на CDN. Забаненным — 403."""
+    if is_banned_user(user_id):
+        return 'Forbidden', 403
     return redirect(VPN_CONFIG_URL, code=302)
 
 
 @app.route('/<int:user_id>/obs')
 def serve_obs(user_id):
-    """ОБС — только для премиум, иначе обычный VPN."""
+    """ОБС — только для премиум, иначе обычный VPN. Забаненным — 403."""
+    if is_banned_user(user_id):
+        return 'Forbidden', 403
     if not is_premium_user(user_id):
         return redirect(VPN_CONFIG_URL, code=302)
     return redirect(OBHOD_CONFIG_URL, code=302)
-
-
-@app.route('/update/<int:user_id>')
-def force_update(user_id):
-    return serve_vpn(user_id)
-
-
-@app.route('/update/<int:user_id>/obs')
-def force_update_obs(user_id):
-    return serve_obs(user_id)
 
 
 # ─── ADMIN API ────────────────────────────────────────────
@@ -120,13 +137,21 @@ def set_premium(user_id, status):
 
 @app.route('/delete_user/<int:user_id>', methods=['POST'])
 def delete_user(user_id):
-    """Бот вызывает при бане пользователя."""
+    """Бот вызывает при бане пользователя — ставит флаг is_banned."""
     secret = request.headers.get('X-Secret', '')
     if secret != SECRET_KEY:
         return 'Forbidden', 403
     try:
         conn = get_db()
-        conn.execute("DELETE FROM users WHERE user_id=?", (user_id,))
+        # Вставляем если нет, затем обновляем флаги
+        conn.execute(
+            "INSERT OR IGNORE INTO users (user_id, is_banned, is_premium) VALUES (?, 1, 0)",
+            (user_id,)
+        )
+        conn.execute(
+            "UPDATE users SET is_banned=1, is_premium=0 WHERE user_id=?",
+            (user_id,)
+        )
         conn.commit()
         conn.close()
         return 'OK', 200
