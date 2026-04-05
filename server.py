@@ -2,16 +2,16 @@ import sqlite3
 import urllib.request
 import threading
 import time
-from flask import Flask, request, Response
+from flask import Flask, request, Response, redirect
 
 app = Flask(__name__)
 
 DB_PATH = 'vpn_database.db'
 VPN_CONFIG_URL = (
-    "https://cdn.statically.io/gh/igareck/vpn-configs-for-russia@main/BLACK_VLESS_RUS_mobile.txt"
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS_mobile.txt"
 )
 OBHOD_CONFIG_URL = (
-    "https://cdn.statically.io/gh/igareck/vpn-configs-for-russia@main/Vless-Reality-White-Lists-Rus-Mobile.txt"
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt"
 )
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"  # ⚠️ замени на свой URL после деплоя
 SECRET_KEY = "cbn_secret_2026"                        # ⚠️ одинаковый в боте и сервере
@@ -20,8 +20,8 @@ CACHE_TTL = 900  # 15 минут
 
 # ─── КЕШ КОНФИГОВ ─────────────────────────────────────────
 _cache = {
-    "vpn":  {"data": None, "updated_at": 0},
-    "obs":  {"data": None, "updated_at": 0},
+    "vpn":  {"data": None, "updated_at": 0, "updating": False},
+    "obs":  {"data": None, "updated_at": 0, "updating": False},
 }
 _cache_lock = threading.Lock()
 
@@ -48,32 +48,45 @@ def _warm_one(key: str, url: str):
         with _cache_lock:
             _cache[key]["data"] = data
             _cache[key]["updated_at"] = time.time()
+            _cache[key]["updating"] = False
+        print(f"[cache] Обновлён {key}: {len(data)} байт")
     except Exception as e:
+        with _cache_lock:
+            _cache[key]["updating"] = False
         print(f"[cache] Не удалось скачать {key}: {e}")
 
 
 def get_config(key: str, url: str) -> bytes:
-    """Возвращает конфиг из кеша. Если кеш устарел — обновляет синхронно.
-    Если скачать не удалось, но старый кеш есть — отдаёт старый."""
+    """Возвращает конфиг из кеша НЕМЕДЛЕННО.
+    Если кеш пустой — качаем синхронно (только при первом старте).
+    Если кеш устарел — запускаем фоновое обновление и отдаём старый."""
     with _cache_lock:
         entry = _cache[key]
         cache_has_data = entry["data"] is not None
         cache_fresh = cache_has_data and (time.time() - entry["updated_at"]) < CACHE_TTL
+        already_updating = entry.get("updating", False)
 
+    # Кеш свежий — отдаём сразу
     if cache_fresh:
         return entry["data"]
 
+    # Кеш устарел но данные есть — запускаем фоновое обновление и отдаём старое
+    if cache_has_data and not already_updating:
+        with _cache_lock:
+            _cache[key]["updating"] = True
+        threading.Thread(target=_warm_one, args=(key, url), daemon=True).start()
+        return entry["data"]
+
+    # Кеш пустой (первый старт) — качаем синхронно, деваться некуда
     try:
         data = _download(url)
         with _cache_lock:
             _cache[key]["data"] = data
             _cache[key]["updated_at"] = time.time()
+            _cache[key]["updating"] = False
         return data
     except Exception as e:
-        with _cache_lock:
-            if _cache[key]["data"] is not None:
-                print(f"[cache] Используем старый кеш для {key}: {e}")
-                return _cache[key]["data"]
+        print(f"[cache] Не удалось скачать {key}: {e}")
         raise
 
 
@@ -192,32 +205,10 @@ def serve_obs(user_id):
     if is_banned_user(user_id):
         return '', 200
     if not is_premium_user(user_id):
-        try:
-            data = get_config("vpn", VPN_CONFIG_URL)
-        except Exception as e:
-            return f"upstream error: {e}", 502
-        return Response(
-            content,
-            status=200,
-            headers={
-                "Content-Type": "text/plain; charset=utf-8",
-                "profile-title": "CBN VPN",
-                "Cache-Control": "no-cache",
-            }
-        )
-    try:
-        data = get_config("obs", OBHOD_CONFIG_URL)
-    except Exception as e:
-        return f"upstream error: {e}", 502
-    return Response(
-        content,
-        status=200,
-        headers={
-            "Content-Type": "text/plain; charset=utf-8",
-            "profile-title": "CBN VPN Premium",
-            "Cache-Control": "no-cache",
-        }
-    )
+        # Не премиум — редирект на обычный VPN
+        return redirect(VPN_CONFIG_URL, code=302)
+    # Премиум — редирект напрямую на GitHub, быстро и без зависаний
+    return redirect(OBHOD_CONFIG_URL, code=302)
 
 
 # ─── ADMIN API ────────────────────────────────────────────
