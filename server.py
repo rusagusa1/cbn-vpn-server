@@ -214,7 +214,7 @@ def serve_obs(user_id):
         status=200,
         headers={
             "Content-Type": "text/plain; charset=utf-8",
-            "profile-title": "CBN VPN (ОБС)",
+            "profile-title": "CBN VPN Premium",
             "Cache-Control": "no-cache",
         }
     )
