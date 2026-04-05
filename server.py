@@ -16,7 +16,7 @@ OBHOD_CONFIG_URL = (
 )
 
 _cache = {}
-RENDER_URL = "https://cbn-vpn.onrender.com"  # ⚠️ замени на свой URL после деплоя
+RENDER_URL = "https://cbn-vpn-server.onrender.com/"  # ⚠️ замени на свой URL после деплоя
 
 
 def fetch_config(url: str) -> str:
