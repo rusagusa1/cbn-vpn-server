@@ -3,7 +3,7 @@ import urllib.request
 import base64
 import threading
 import time
-from flask import Flask, Response
+from flask import Flask, Response, request
 
 app = Flask(__name__)
 DB_PATH = 'vpn_database.db'
@@ -17,6 +17,7 @@ OBHOD_CONFIG_URL = (
 
 _cache = {}
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"  # ⚠️ замени на свой URL после деплоя
+SECRET_KEY = "cbn_secret_2026"  # ⚠️ поменяй на свой секрет, одинаковый в боте и сервере
 
 
 def fetch_config(url: str) -> str:
@@ -64,6 +65,8 @@ def serve_config(user_id):
 
     content = fetch_config(url)
 
+    is_prem = row and row["is_premium"] == 1
+
     return Response(
         content,
         mimetype="text/plain; charset=utf-8",
@@ -72,6 +75,13 @@ def serve_config(user_id):
             "Cache-Control": "no-cache",
             "profile-update-interval": "12",
             "ngrok-skip-browser-warning": "true",
+            "profile-title": "CBN VPN — Премиум (ОБС)" if is_prem else "CBN VPN",
+            "subscription-userinfo": "upload=0; download=0; total=0; expire=0",
+            "profile-update-interval": "12",
+            "support-url": "https://t.me/cherniy_bez_nomerov",
+            "profile-web-page-url": "https://t.me/CBN_VPN",
+            "channel-url": "https://t.me/CBN_VPN",
+            "bot-url": "https://t.me/CBN_VPN",
         }
     )
 
@@ -80,6 +90,45 @@ def serve_config(user_id):
 def force_update(user_id):
     _cache.clear()
     return serve_config(user_id)
+
+
+@app.route('/set_premium/<int:user_id>/<int:status>', methods=['POST'])
+def set_premium(user_id, status):
+    """Бот вызывает этот endpoint при выдаче/снятии премиума."""
+    secret = request.headers.get('X-Secret', '')
+    if secret != SECRET_KEY:
+        return 'Forbidden', 403
+    try:
+        conn = get_db()
+        conn.execute(
+            "INSERT OR IGNORE INTO users (user_id, is_premium) VALUES (?, ?)",
+            (user_id, status)
+        )
+        conn.execute(
+            "UPDATE users SET is_premium=? WHERE user_id=?",
+            (status, user_id)
+        )
+        conn.commit()
+        conn.close()
+        return 'OK', 200
+    except Exception as e:
+        return str(e), 500
+
+
+@app.route('/delete_user/<int:user_id>', methods=['POST'])
+def delete_user(user_id):
+    """Бот вызывает при бане пользователя."""
+    secret = request.headers.get('X-Secret', '')
+    if secret != SECRET_KEY:
+        return 'Forbidden', 403
+    try:
+        conn = get_db()
+        conn.execute("DELETE FROM users WHERE user_id=?", (user_id,))
+        conn.commit()
+        conn.close()
+        return 'OK', 200
+    except Exception as e:
+        return str(e), 500
 
 
 @app.route('/')
