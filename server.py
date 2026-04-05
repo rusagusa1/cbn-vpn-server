@@ -2,7 +2,7 @@ import sqlite3
 import urllib.request
 import threading
 import time
-from flask import Flask, request, redirect
+from flask import Flask, request, Response
 
 app = Flask(__name__)
 
@@ -16,6 +16,58 @@ OBHOD_CONFIG_URL = (
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"  # ⚠️ замени на свой URL после деплоя
 SECRET_KEY = "cbn_secret_2026"                        # ⚠️ одинаковый в боте и сервере
 ADMIN_ID = 1448623020
+CACHE_TTL = 900  # 15 минут
+
+# ─── КЕШ КОНФИГОВ ─────────────────────────────────────────
+_cache = {
+    "vpn":  {"data": None, "updated_at": 0},
+    "obs":  {"data": None, "updated_at": 0},
+}
+_cache_lock = threading.Lock()
+
+
+def _download(url: str) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return resp.read()
+
+
+def get_config(key: str, url: str) -> bytes:
+    """Возвращает конфиг из кеша. Если кеш устарел — обновляет синхронно."""
+    with _cache_lock:
+        entry = _cache[key]
+        if entry["data"] is not None and (time.time() - entry["updated_at"]) < CACHE_TTL:
+            return entry["data"]
+
+    # Кеш устарел — скачиваем
+    data = _download(url)
+    with _cache_lock:
+        _cache[key]["data"] = data
+        _cache[key]["updated_at"] = time.time()
+    return data
+
+
+def _refresh_cache():
+    """Фоновый поток: обновляет оба конфига каждые 15 минут."""
+    # Первый прогрев сразу при старте
+    for key, url in [("vpn", VPN_CONFIG_URL), ("obs", OBHOD_CONFIG_URL)]:
+        try:
+            data = _download(url)
+            with _cache_lock:
+                _cache[key]["data"] = data
+                _cache[key]["updated_at"] = time.time()
+        except Exception:
+            pass
+    while True:
+        time.sleep(CACHE_TTL)
+        for key, url in [("vpn", VPN_CONFIG_URL), ("obs", OBHOD_CONFIG_URL)]:
+            try:
+                data = _download(url)
+                with _cache_lock:
+                    _cache[key]["data"] = data
+                    _cache[key]["updated_at"] = time.time()
+            except Exception:
+                pass  # Старый кеш остаётся — не рушим сервис
 
 
 def keep_alive():
@@ -50,6 +102,7 @@ def init_db():
 
 init_db()
 threading.Thread(target=keep_alive, daemon=True).start()
+threading.Thread(target=_refresh_cache, daemon=True).start()
 
 
 def get_db():
@@ -94,20 +147,56 @@ def is_premium_user(user_id: int) -> bool:
 
 @app.route('/<int:user_id>')
 def serve_vpn(user_id):
-    """Обычный VPN — редирект напрямую на CDN. Забаненным — 403."""
+    """Обычный VPN. Забаненным — пустой конфиг чтобы INCY сбросил кеш."""
     if is_banned_user(user_id):
-        return 'Forbidden', 403
-    return redirect(VPN_CONFIG_URL, code=302)
+        return '', 200
+    try:
+        content = get_config("vpn", VPN_CONFIG_URL)
+    except Exception as e:
+        return f"upstream error: {e}", 502
+    return Response(
+        content,
+        status=200,
+        headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "profile-title": "CBN VPN",
+            "Cache-Control": "no-cache",
+        }
+    )
 
 
 @app.route('/<int:user_id>/obs')
 def serve_obs(user_id):
-    """ОБС — только для премиум, иначе обычный VPN. Забаненным — 403."""
+    """ОБС — только для премиум. Забаненным — пустой конфиг."""
     if is_banned_user(user_id):
-        return 'Forbidden', 403
+        return '', 200
     if not is_premium_user(user_id):
-        return redirect(VPN_CONFIG_URL, code=302)
-    return redirect(OBHOD_CONFIG_URL, code=302)
+        try:
+            content = get_config("vpn", VPN_CONFIG_URL)
+        except Exception as e:
+            return f"upstream error: {e}", 502
+        return Response(
+            content,
+            status=200,
+            headers={
+                "Content-Type": "text/plain; charset=utf-8",
+                "profile-title": "CBN VPN",
+                "Cache-Control": "no-cache",
+            }
+        )
+    try:
+        content = get_config("obs", OBHOD_CONFIG_URL)
+    except Exception as e:
+        return f"upstream error: {e}", 502
+    return Response(
+        content,
+        status=200,
+        headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "profile-title": "CBN VPN (ОБС)",
+            "Cache-Control": "no-cache",
+        }
+    )
 
 
 # ─── ADMIN API ────────────────────────────────────────────
@@ -124,9 +213,33 @@ def set_premium(user_id, status):
             "INSERT OR IGNORE INTO users (user_id, is_premium) VALUES (?, ?)",
             (user_id, status)
         )
+        # При выдаче премиума также снимаем бан на случай если он был
         conn.execute(
-            "UPDATE users SET is_premium=? WHERE user_id=?",
+            "UPDATE users SET is_premium=?, is_banned=0 WHERE user_id=?",
             (status, user_id)
+        )
+        conn.commit()
+        conn.close()
+        return 'OK', 200
+    except Exception as e:
+        return str(e), 500
+
+
+@app.route('/unban_user/<int:user_id>', methods=['POST'])
+def unban_user(user_id):
+    """Бот вызывает при разбане пользователя — снимает флаг is_banned."""
+    secret = request.headers.get('X-Secret', '')
+    if secret != SECRET_KEY:
+        return 'Forbidden', 403
+    try:
+        conn = get_db()
+        conn.execute(
+            "INSERT OR IGNORE INTO users (user_id, is_banned, is_premium) VALUES (?, 0, 0)",
+            (user_id,)
+        )
+        conn.execute(
+            "UPDATE users SET is_banned=0 WHERE user_id=?",
+            (user_id,)
         )
         conn.commit()
         conn.close()
