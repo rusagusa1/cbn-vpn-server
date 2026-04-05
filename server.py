@@ -16,9 +16,6 @@ OBHOD_CONFIG_URL = (
 )
 
 _cache = {}
-
-# Создаём БД при старте (нужно для Render где файловая система пустая)
-init_db()
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"  # ⚠️ замени на свой URL после деплоя
 SECRET_KEY = "cbn_secret_2026"  # ⚠️ поменяй на свой секрет, одинаковый в боте и сервере
 
@@ -59,6 +56,10 @@ def init_db():
     )""")
     conn.commit()
     conn.close()
+
+
+# Создаём БД при старте
+init_db()
 
 
 def get_db():
@@ -156,3 +157,4 @@ if __name__ == '__main__':
     init_db()
     threading.Thread(target=keep_alive, daemon=True).start()
     app.run(host='0.0.0.0', port=5000, debug=False)
+
