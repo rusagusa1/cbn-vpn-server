@@ -6,18 +6,19 @@ import time
 from flask import Flask, Response, request
 
 app = Flask(__name__)
-DB_PATH = 'vpn_database.db'
 
+DB_PATH = 'vpn_database.db'
 VPN_CONFIG_URL = (
     "https://cdn.jsdelivr.net/gh/igareck/vpn-configs-for-russia@main/BLACK_VLESS_RUS_mobile.txt"
 )
 OBHOD_CONFIG_URL = (
     "https://cdn.jsdelivr.net/gh/igareck/vpn-configs-for-russia@main/Vless-Reality-White-Lists-Rus-Mobile.txt"
 )
-
 _cache = {}
+
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"  # ⚠️ замени на свой URL после деплоя
-SECRET_KEY = "cbn_secret_2026"  # ⚠️ поменяй на свой секрет, одинаковый в боте и сервере
+SECRET_KEY = "cbn_secret_2026"                        # ⚠️ одинаковый в боте и сервере
+ADMIN_ID = 1448623020
 
 
 def fetch_config(url: str) -> str:
@@ -48,17 +49,16 @@ def keep_alive():
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""CREATE TABLE IF NOT EXISTS users (
-        user_id        INTEGER PRIMARY KEY,
-        username       TEXT,
+        user_id INTEGER PRIMARY KEY,
+        username TEXT,
         premium_expiry TEXT,
-        is_premium     INTEGER DEFAULT 0,
-        reg_date       TEXT
+        is_premium INTEGER DEFAULT 0,
+        reg_date TEXT
     )""")
     conn.commit()
     conn.close()
 
 
-# Создаём БД при старте
 init_db()
 
 
@@ -68,21 +68,56 @@ def get_db():
     return conn
 
 
-@app.route('/<int:user_id>')
-def serve_config(user_id):
+def is_premium_user(user_id: int) -> bool:
+    """Проверяет, является ли пользователь премиум."""
+    if user_id == ADMIN_ID:
+        return True
     try:
         conn = get_db()
         row = conn.execute(
             "SELECT is_premium FROM users WHERE user_id=?", (user_id,)
         ).fetchone()
         conn.close()
-        url = OBHOD_CONFIG_URL if (row and row["is_premium"] == 1) else VPN_CONFIG_URL
+        return bool(row and row["is_premium"] == 1)
     except Exception:
-        url = VPN_CONFIG_URL
+        return False
 
-    content = fetch_config(url)
 
-    is_prem = row and row["is_premium"] == 1
+# ─── МАРШРУТЫ ─────────────────────────────────────────────
+
+@app.route('/<int:user_id>')
+def serve_vpn(user_id):
+    """Обычный VPN — для всех пользователей."""
+    content = fetch_config(VPN_CONFIG_URL)
+    return Response(
+        content,
+        mimetype="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": "inline",
+            "Cache-Control": "no-cache",
+            "profile-update-interval": "12",
+            "ngrok-skip-browser-warning": "true",
+            "profile-title": "CBN VPN",
+            "subscription-userinfo": "upload=0; download=0; total=0; expire=0",
+            "support-url": "https://t.me/cherniy_bez_nomerov",
+            "profile-web-page-url": "https://t.me/CBN_VPN",
+            "channel-url": "https://t.me/CBN_VPN",
+            "bot-url": "https://t.me/CBN_VPN",
+        }
+    )
+
+
+@app.route('/<int:user_id>/obs')
+def serve_obs(user_id):
+    """ОБС — только для премиум-пользователей."""
+    if not is_premium_user(user_id):
+        # Не премиум — отдаём обычный конфиг, чтобы ссылка не ломалась,
+        # но без обхода белых списков
+        content = fetch_config(VPN_CONFIG_URL)
+        title = "CBN VPN (нет Премиума)"
+    else:
+        content = fetch_config(OBHOD_CONFIG_URL)
+        title = "CBN VPN — ОБС (Премиум)"
 
     return Response(
         content,
@@ -92,9 +127,8 @@ def serve_config(user_id):
             "Cache-Control": "no-cache",
             "profile-update-interval": "12",
             "ngrok-skip-browser-warning": "true",
-            "profile-title": "CBN VPN — Премиум (ОБС)" if is_prem else "CBN VPN",
+            "profile-title": title,
             "subscription-userinfo": "upload=0; download=0; total=0; expire=0",
-            "profile-update-interval": "12",
             "support-url": "https://t.me/cherniy_bez_nomerov",
             "profile-web-page-url": "https://t.me/CBN_VPN",
             "channel-url": "https://t.me/CBN_VPN",
@@ -106,8 +140,16 @@ def serve_config(user_id):
 @app.route('/update/<int:user_id>')
 def force_update(user_id):
     _cache.clear()
-    return serve_config(user_id)
+    return serve_vpn(user_id)
 
+
+@app.route('/update/<int:user_id>/obs')
+def force_update_obs(user_id):
+    _cache.clear()
+    return serve_obs(user_id)
+
+
+# ─── ADMIN API ────────────────────────────────────────────
 
 @app.route('/set_premium/<int:user_id>/<int:status>', methods=['POST'])
 def set_premium(user_id, status):
@@ -157,4 +199,3 @@ if __name__ == '__main__':
     init_db()
     threading.Thread(target=keep_alive, daemon=True).start()
     app.run(host='0.0.0.0', port=5000, debug=False)
-
