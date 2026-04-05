@@ -193,7 +193,7 @@ def serve_obs(user_id):
         return '', 200
     if not is_premium_user(user_id):
         try:
-            content = get_config("vpn", VPN_CONFIG_URL)
+            data = get_config("vpn", VPN_CONFIG_URL)
         except Exception as e:
             return f"upstream error: {e}", 502
         return Response(
@@ -206,7 +206,7 @@ def serve_obs(user_id):
             }
         )
     try:
-        content = get_config("obs", OBHOD_CONFIG_URL)
+        data = get_config("obs", OBHOD_CONFIG_URL)
     except Exception as e:
         return f"upstream error: {e}", 502
     return Response(
