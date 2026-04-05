@@ -26,10 +26,30 @@ _cache = {
 _cache_lock = threading.Lock()
 
 
-def _download(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return resp.read()
+def _download(url: str, timeout: int = 30, retries: int = 3) -> bytes:
+    """Скачивает URL с retry. Таймаут увеличен до 30с."""
+    last_err = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)  # 1с, 2с между попытками
+    raise last_err
+
+
+def _warm_one(key: str, url: str):
+    """Скачивает один конфиг и кладёт в кеш. Для параллельного прогрева."""
+    try:
+        data = _download(url)
+        with _cache_lock:
+            _cache[key]["data"] = data
+            _cache[key]["updated_at"] = time.time()
+    except Exception as e:
+        print(f"[cache] Не удалось скачать {key}: {e}")
 
 
 def get_config(key: str, url: str) -> bytes:
@@ -39,7 +59,7 @@ def get_config(key: str, url: str) -> bytes:
         if entry["data"] is not None and (time.time() - entry["updated_at"]) < CACHE_TTL:
             return entry["data"]
 
-    # Кеш устарел — скачиваем
+    # Кеш устарел или пустой — скачиваем
     data = _download(url)
     with _cache_lock:
         _cache[key]["data"] = data
@@ -48,26 +68,28 @@ def get_config(key: str, url: str) -> bytes:
 
 
 def _refresh_cache():
-    """Фоновый поток: обновляет оба конфига каждые 15 минут."""
-    # Первый прогрев сразу при старте
-    for key, url in [("vpn", VPN_CONFIG_URL), ("obs", OBHOD_CONFIG_URL)]:
-        try:
-            data = _download(url)
-            with _cache_lock:
-                _cache[key]["data"] = data
-                _cache[key]["updated_at"] = time.time()
-        except Exception:
-            pass
+    """Фоновый поток: прогревает кеш параллельно при старте, затем обновляет каждые 15 минут."""
+    # Параллельный прогрев при старте — VPN и ОБС качаются одновременно
+    threads = [
+        threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True),
+        threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Дальше — цикл обновления каждые 15 минут
     while True:
         time.sleep(CACHE_TTL)
-        for key, url in [("vpn", VPN_CONFIG_URL), ("obs", OBHOD_CONFIG_URL)]:
-            try:
-                data = _download(url)
-                with _cache_lock:
-                    _cache[key]["data"] = data
-                    _cache[key]["updated_at"] = time.time()
-            except Exception:
-                pass  # Старый кеш остаётся — не рушим сервис
+        threads = [
+            threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True),
+            threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
 
 def keep_alive():
