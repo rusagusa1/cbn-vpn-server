@@ -6,10 +6,10 @@ from flask import Flask, request, Response, redirect
 app = Flask(__name__)
 
 VPN_CONFIG_URL = (
-    "https://cdn.jsdelivr.net/gh/igareck/vpn-configs-for-russia@main/BLACK_VLESS_RUS.txt"
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS.txt"
 )
 OBHOD_CONFIG_URL = (
-    "https://cdn.statically.io/gh/igareck/vpn-configs-for-russia@main/WHITE-CIDR-RU-all.txt"
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt"
 )
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"  # ⚠️ замени на свой URL после деплоя
 SECRET_KEY = "cbn_secret_2026"                        # ⚠️ одинаковый в боте и сервере
