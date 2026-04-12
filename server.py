@@ -192,7 +192,9 @@ def serve_vpn(user_id):
         headers={
             "Content-Type": "text/plain; charset=utf-8",
             "profile-title": "CBN VPN",
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
         }
     )
 
@@ -204,7 +206,6 @@ def serve_obs(user_id):
         return '', 200
     if not is_premium_user(user_id):
         return redirect(VPN_CONFIG_URL, code=302)
-    # Качаем напрямую с GitHub с коротким таймаутом и отдаём с заголовком
     try:
         data = _download(OBHOD_CONFIG_URL, timeout=10, retries=1)
         return Response(
@@ -213,11 +214,12 @@ def serve_obs(user_id):
             headers={
                 "Content-Type": "text/plain; charset=utf-8",
                 "profile-title": "CBN VPN Premium",
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
             }
         )
     except Exception:
-        # Не успели скачать — редирект как fallback (без названия, но работает)
         return redirect(OBHOD_CONFIG_URL, code=302)
 
 
@@ -297,6 +299,26 @@ def delete_user(user_id):
 @app.route('/')
 def health():
     return "CBN VPN Web Server is Online", 200
+
+
+@app.route('/flush_cache', methods=['POST'])
+def flush_cache():
+    """Принудительно сбрасывает кэш конфигов — вызывай после смены источника."""
+    secret = request.headers.get('X-Secret', '')
+    if secret != SECRET_KEY:
+        return 'Forbidden', 403
+    with _cache_lock:
+        _cache["vpn"]["data"] = None
+        _cache["vpn"]["updated_at"] = 0
+        _cache["vpn"]["updating"] = False
+        _cache["obs"]["data"] = None
+        _cache["obs"]["updated_at"] = 0
+        _cache["obs"]["updating"] = False
+    # Сразу запускаем прогрев в фоне
+    threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True).start()
+    threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True).start()
+    print("[cache] Принудительный сброс кэша выполнен")
+    return 'OK — cache flushed, reloading in background', 200
 
 
 if __name__ == '__main__':
