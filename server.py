@@ -160,8 +160,6 @@ def is_banned_user(user_id: int) -> bool:
 
 def is_premium_user(user_id: int) -> bool:
     """Проверяет, является ли пользователь премиум."""
-    if user_id == ADMIN_ID:
-        return True
     try:
         conn = get_db()
         row = conn.execute(
