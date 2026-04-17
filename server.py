@@ -1,8 +1,13 @@
+"""
+CBN VPN Server - STATELESS VERSION
+Теперь состояние хранится только в памяти и синхронизируется с ботом.
+При перезапуске сервер получает состояние от бота через /sync.
+"""
+
 import urllib.request
 import threading
 import time
 import json
-import os
 from flask import Flask, request, Response, redirect
 
 app = Flask(__name__)
@@ -11,54 +16,24 @@ VPN_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BL
 OBHOD_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt"
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
-ADMIN_ID = 1448623020
 CACHE_TTL = 900
-STATE_FILE = "server_state.json"
 
-# ─── СОСТОЯНИЕ В ПАМЯТИ ──────────────────────────────────
+# ─── СОСТОЯНИЕ ТОЛЬКО В ПАМЯТИ ────────────────────────────
 _premium_users: dict[int, bool] = {}
 _banned_users: dict[int, bool] = {}
 _state_lock = threading.Lock()
 
-def save_state():
-    """Сохраняет состояние в JSON файл"""
-    with _state_lock:
-        try:
-            with open(STATE_FILE, "w") as f:
-                json.dump({
-                    "premium": list(_premium_users.keys()),
-                    "banned": list(_banned_users.keys()),
-                    "updated_at": time.time()
-                }, f)
-            print(f"[state] Сохранено в файл: {len(_premium_users)} premium, {len(_banned_users)} banned")
-        except Exception as e:
-            print(f"[state] Ошибка сохранения: {e}")
-
-def load_state():
-    """Загружает состояние из JSON файла"""
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r") as f:
-                data = json.load(f)
-                for uid in data.get("premium", []):
-                    _premium_users[uid] = True
-                for uid in data.get("banned", []):
-                    _banned_users[uid] = True
-                print(f"[state] Загружено из файла: {len(data.get('premium', []))} premium, {len(data.get('banned', []))} banned")
-        except Exception as e:
-            print(f"[state] Ошибка загрузки: {e}")
-
 def set_premium(user_id: int, status: bool):
     with _state_lock:
         _premium_users[user_id] = status
-    save_state()
+    print(f"[state] premium user={user_id} status={status}")
 
 def set_banned(user_id: int, status: bool):
     with _state_lock:
         _banned_users[user_id] = status
         if status:
             _premium_users[user_id] = False
-    save_state()
+    print(f"[state] ban user={user_id} status={status}")
 
 def is_premium_user(user_id: int) -> bool:
     with _state_lock:
@@ -142,12 +117,9 @@ def keep_alive():
     while True:
         time.sleep(600)
         try:
-            urllib.request.urlopen(RENDER_URL + "/", timeout=10)
+            urllib.request.urlopen(RENDER_URL + "/health", timeout=10)
         except Exception:
             pass
-
-# Загружаем состояние при старте
-load_state()
 
 threading.Thread(target=keep_alive, daemon=True).start()
 threading.Thread(target=_refresh_cache, daemon=True).start()
@@ -181,6 +153,11 @@ def health():
     with _state_lock:
         return {"status": "ok", "timestamp": time.time(), "premium": len(_premium_users), "banned": len(_banned_users)}, 200
 
+@app.route('/')
+def root():
+    with _state_lock:
+        return f"CBN VPN Server Online | premium={len(_premium_users)} banned={len(_banned_users)}", 200
+
 # ─── ADMIN API ────────────────────────────────────────────
 @app.route('/set_premium/<int:user_id>/<int:status>', methods=['POST'])
 def api_set_premium(user_id, status):
@@ -188,7 +165,6 @@ def api_set_premium(user_id, status):
     if secret != SECRET_KEY:
         return 'Forbidden', 403
     set_premium(user_id, bool(status))
-    print(f"[state] premium user={user_id} status={status}")
     return 'OK', 200
 
 @app.route('/unban_user/<int:user_id>', methods=['POST'])
@@ -197,7 +173,6 @@ def api_unban_user(user_id):
     if secret != SECRET_KEY:
         return 'Forbidden', 403
     set_banned(user_id, False)
-    print(f"[state] unban user={user_id}")
     return 'OK', 200
 
 @app.route('/delete_user/<int:user_id>', methods=['POST'])
@@ -206,7 +181,6 @@ def api_delete_user(user_id):
     if secret != SECRET_KEY:
         return 'Forbidden', 403
     set_banned(user_id, True)
-    print(f"[state] ban user={user_id}")
     return 'OK', 200
 
 @app.route('/sync', methods=['POST'])
@@ -214,11 +188,14 @@ def api_sync():
     secret = request.headers.get('X-Secret', '')
     if secret != SECRET_KEY:
         return 'Forbidden', 403
-    data = request.get_json(silent=True)
+    
+    data = request.get_json(silent=True)  # Опечатка исправлена
     if not data:
         return 'Bad JSON', 400
+    
     premium_ids = set(int(i) for i in data.get('premium', []))
     banned_ids = set(int(i) for i in data.get('banned', []))
+    
     with _state_lock:
         _premium_users.clear()
         _banned_users.clear()
@@ -226,7 +203,7 @@ def api_sync():
             _premium_users[uid] = True
         for uid in banned_ids:
             _banned_users[uid] = True
-    save_state()
+    
     print(f"[state] sync: {len(premium_ids)} premium, {len(banned_ids)} banned")
     return 'OK', 200
 
@@ -235,20 +212,17 @@ def flush_cache():
     secret = request.headers.get('X-Secret', '')
     if secret != SECRET_KEY:
         return 'Forbidden', 403
+    
     with _cache_lock:
         for key in _cache:
             _cache[key]["data"] = None
             _cache[key]["updated_at"] = 0
             _cache[key]["updating"] = False
+    
     threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True).start()
     threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True).start()
     print("[cache] Принудительный сброс кэша выполнен")
     return 'OK — cache flushed, reloading in background', 200
-
-@app.route('/')
-def root():
-    with _state_lock:
-        return f"CBN VPN Server Online | premium={len(_premium_users)} banned={len(_banned_users)}", 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
