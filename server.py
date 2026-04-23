@@ -1,19 +1,18 @@
 """
-CBN VPN Server - STATELESS VERSION with Async Ping
-- МГНОВЕННАЯ отдача конфигов (без ожидания пинга)
-- Пинг измеряется в фоне и кэшируется
-- Переименование подписок
-- Совместимость со всеми клиентами (INCY, Happ, V2Box, Streisand)
+CBN VPN Server - v3.2
+- Обычная подписка: CBN VPN
+- Премиум/OBS подписка: CBN VPN Premium
+- Короткие названия серверов
+- Фоновый пинг
 """
 
 import urllib.request
 import threading
 import time
-import json
 import re
 import socket
-import concurrent.futures
 from datetime import datetime
+from collections import OrderedDict
 from flask import Flask, request, Response, redirect
 
 app = Flask(__name__)
@@ -21,43 +20,74 @@ app = Flask(__name__)
 VPN_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt"
 OBHOD_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt"
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"
-CHANNEL_LINK = "https://t.me/CBN_VPN"
-SUPPORT_LINK = "https://t.me/cherniy_bez_nomerov"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
-PING_CACHE_TTL = 600  # 10 минут кэш пинга
+PING_CACHE_TTL = 600
 
 # ============================================================
-# СЛОВАРЬ ПЕРЕВОДОВ
+# ПЕРЕВОДЫ
 # ============================================================
-LOCATION_TRANSLATIONS = {
-    "Netherlands": "Нидерланды", "Germany": "Германия", "Finland": "Финляндия",
-    "Sweden": "Швеция", "Norway": "Норвегия", "Switzerland": "Швейцария",
-    "France": "Франция", "UK": "Великобритания", "United Kingdom": "Великобритания",
-    "USA": "США", "United States": "США", "Canada": "Канада",
-    "Japan": "Япония", "Singapore": "Сингапур", "Hong Kong": "Гонконг",
-    "Italy": "Италия", "Spain": "Испания", "Poland": "Польша",
-    "Latvia": "Латвия", "Lithuania": "Литва", "Estonia": "Эстония",
-    "Russia": "Россия", "Ukraine": "Украина", "Turkey": "Турция",
-    "India": "Индия", "Brazil": "Бразилия", "Australia": "Австралия",
-    "Austria": "Австрия", "Belgium": "Бельгия", "Czech": "Чехия",
-    "Denmark": "Дания", "Ireland": "Ирландия", "Portugal": "Португалия",
-    "Romania": "Румыния", "Slovakia": "Словакия", "Bulgaria": "Болгария",
-    "Croatia": "Хорватия", "Greece": "Греция", "Hungary": "Венгрия",
-    "Iceland": "Исландия", "Luxembourg": "Люксембург", "Serbia": "Сербия",
-    "Amsterdam": "Амстердам", "Frankfurt": "Франкфурт", "Helsinki": "Хельсинки",
-    "Stockholm": "Стокгольм", "Oslo": "Осло", "Zurich": "Цюрих",
-    "Paris": "Париж", "London": "Лондон", "New York": "Нью-Йорк",
-    "Los Angeles": "Лос-Анджелес", "Toronto": "Торонто", "Tokyo": "Токио",
-    "Moscow": "Москва", "Kiev": "Киев", "Warsaw": "Варшава",
-    "Madrid": "Мадрид", "Rome": "Рим", "Milan": "Милан",
-    "Vienna": "Вена", "Prague": "Прага", "Berlin": "Берлин",
-    "Munich": "Мюнхен", "Hamburg": "Гамбург", "Lisbon": "Лиссабон",
-    "Dublin": "Дублин", "Copenhagen": "Копенгаген", "Brussels": "Брюссель",
-    "Barcelona": "Барселона", "Budapest": "Будапешт", "Bucharest": "Бухарест",
-    "Sofia": "София", "Athens": "Афины", "Riga": "Рига",
-    "Tallinn": "Таллин", "Vilnius": "Вильнюс",
-}
+LOCATION_TRANSLATIONS = OrderedDict([
+    # Страны
+    ("Netherlands", "Нидерланды"), ("Germany", "Германия"), ("Finland", "Финляндия"),
+    ("Sweden", "Швеция"), ("Norway", "Норвегия"), ("Switzerland", "Швейцария"),
+    ("France", "Франция"), ("United Kingdom", "Великобритания"), ("UK", "Великобритания"),
+    ("United States", "США"), ("USA", "США"), ("Canada", "Канада"),
+    ("Japan", "Япония"), ("Singapore", "Сингапур"), ("Hong Kong", "Гонконг"),
+    ("Italy", "Италия"), ("Spain", "Испания"), ("Poland", "Польша"),
+    ("Latvia", "Латвия"), ("Lithuania", "Литва"), ("Estonia", "Эстония"),
+    ("Russia", "Россия"), ("Ukraine", "Украина"), ("Turkey", "Турция"),
+    ("India", "Индия"), ("Brazil", "Бразилия"), ("Australia", "Австралия"),
+    ("Austria", "Австрия"), ("Belgium", "Бельгия"), ("Czech", "Чехия"),
+    ("Denmark", "Дания"), ("Ireland", "Ирландия"), ("Portugal", "Португалия"),
+    ("Romania", "Румыния"), ("Slovakia", "Словакия"), ("Bulgaria", "Болгария"),
+    ("Croatia", "Хорватия"), ("Greece", "Греция"), ("Hungary", "Венгрия"),
+    ("Iceland", "Исландия"), ("Luxembourg", "Люксембург"), ("Serbia", "Сербия"),
+    ("South Korea", "Корея"), ("Taiwan", "Тайвань"), ("Vietnam", "Вьетнам"),
+    ("Thailand", "Таиланд"), ("Malaysia", "Малайзия"), ("Indonesia", "Индонезия"),
+    ("Philippines", "Филиппины"), ("Mexico", "Мексика"), ("Argentina", "Аргентина"),
+    ("Chile", "Чили"), ("South Africa", "ЮАР"), ("Israel", "Израиль"),
+    ("UAE", "ОАЭ"), ("Kazakhstan", "Казахстан"), ("Belarus", "Беларусь"),
+    ("Moldova", "Молдова"), ("Georgia", "Грузия"), ("Cyprus", "Кипр"),
+    ("Malta", "Мальта"), ("Slovenia", "Словения"),
+    # Сокращения
+    ("NL", "Нидерланды"), ("DE", "Германия"), ("FI", "Финляндия"),
+    ("SE", "Швеция"), ("NO", "Норвегия"), ("CH", "Швейцария"),
+    ("FR", "Франция"), ("IT", "Италия"), ("ES", "Испания"),
+    ("PL", "Польша"), ("LV", "Латвия"), ("LT", "Литва"),
+    ("EE", "Эстония"), ("RU", "Россия"), ("UA", "Украина"),
+    ("TR", "Турция"), ("AT", "Австрия"), ("BE", "Бельгия"),
+    ("CZ", "Чехия"), ("DK", "Дания"), ("IE", "Ирландия"),
+    ("PT", "Португалия"), ("RO", "Румыния"), ("SK", "Словакия"),
+    ("BG", "Болгария"), ("HR", "Хорватия"), ("GR", "Греция"),
+    ("HU", "Венгрия"), ("IS", "Исландия"), ("LU", "Люксембург"),
+    ("RS", "Сербия"), ("AU", "Австралия"), ("CA", "Канада"),
+    ("JP", "Япония"), ("SG", "Сингапур"), ("HK", "Гонконг"),
+    ("KR", "Корея"), ("TW", "Тайвань"), ("VN", "Вьетнам"),
+    ("TH", "Таиланд"), ("MY", "Малайзия"), ("ID", "Индонезия"),
+    ("IN", "Индия"), ("BR", "Бразилия"), ("MX", "Мексика"),
+    ("AR", "Аргентина"), ("CL", "Чили"), ("ZA", "ЮАР"),
+    ("IL", "Израиль"), ("KZ", "Казахстан"), ("BY", "Беларусь"),
+    ("MD", "Молдова"), ("GE", "Грузия"), ("CY", "Кипр"),
+    # Города
+    ("Amsterdam", "Амстердам"), ("Frankfurt", "Франкфурт"), ("Helsinki", "Хельсинки"),
+    ("Stockholm", "Стокгольм"), ("Oslo", "Осло"), ("Zurich", "Цюрих"),
+    ("Paris", "Париж"), ("London", "Лондон"), ("Moscow", "Москва"),
+    ("Kiev", "Киев"), ("Warsaw", "Варшава"), ("Madrid", "Мадрид"),
+    ("Rome", "Рим"), ("Milan", "Милан"), ("Vienna", "Вена"),
+    ("Prague", "Прага"), ("Berlin", "Берлин"), ("Munich", "Мюнхен"),
+    ("Hamburg", "Гамбург"), ("Lisbon", "Лиссабон"), ("Dublin", "Дублин"),
+    ("Copenhagen", "Копенгаген"), ("Brussels", "Брюссель"), ("Budapest", "Будапешт"),
+    ("Bucharest", "Бухарест"), ("Sofia", "София"), ("Athens", "Афины"),
+    ("Riga", "Рига"), ("Tallinn", "Таллин"), ("Vilnius", "Вильнюс"),
+    ("Belgrade", "Белград"), ("Bratislava", "Братислава"), ("Istanbul", "Стамбул"),
+    ("Dubai", "Дубай"), ("Tel Aviv", "Тель-Авив"), ("Tokyo", "Токио"),
+    ("Seoul", "Сеул"), ("Sydney", "Сидней"), ("Toronto", "Торонто"),
+    ("New York", "Нью-Йорк"), ("Los Angeles", "Лос-Анджелес"), ("Miami", "Майами"),
+    ("Chicago", "Чикаго"), ("Dallas", "Даллас"), ("Seattle", "Сиэтл"),
+    ("Sao Paulo", "Сан-Паулу"), ("Mexico City", "Мехико"),
+    ("Buenos Aires", "Буэнос-Айрес"), ("St Petersburg", "СПб"),
+])
 
 COUNTRY_FLAGS = {
     "Нидерланды": "🇳🇱", "Германия": "🇩🇪", "Финляндия": "🇫🇮",
@@ -73,342 +103,291 @@ COUNTRY_FLAGS = {
     "Португалия": "🇵🇹", "Румыния": "🇷🇴", "Словакия": "🇸🇰",
     "Болгария": "🇧🇬", "Хорватия": "🇭🇷", "Греция": "🇬🇷",
     "Венгрия": "🇭🇺", "Исландия": "🇮🇸", "Люксембург": "🇱🇺",
-    "Сербия": "🇷🇸",
+    "Сербия": "🇷🇸", "Корея": "🇰🇷", "Тайвань": "🇹🇼",
+    "Вьетнам": "🇻🇳", "Таиланд": "🇹🇭", "Малайзия": "🇲🇾",
+    "Индонезия": "🇮🇩", "Филиппины": "🇵🇭", "Мексика": "🇲🇽",
+    "Аргентина": "🇦🇷", "Чили": "🇨🇱", "ЮАР": "🇿🇦",
+    "Израиль": "🇮🇱", "ОАЭ": "🇦🇪", "Казахстан": "🇰🇿",
+    "Беларусь": "🇧🇾", "Молдова": "🇲🇩", "Грузия": "🇬🇪",
+    "Кипр": "🇨🇾", "Мальта": "🇲🇹", "Словения": "🇸🇮",
 }
 
+REMOVE_WORDS = [
+    'server', 'vpn', 'proxy', 'node', 'tunnel', 'relay',
+    'free', 'public', 'private', 'premium', 'elite',
+    'vip', 'pro', 'plus', 'max', 'ultra', 'turbo',
+    'test', 'demo', 'temp', 'old', 'new',
+    'vless', 'vmess', 'trojan', 'shadowsocks',
+    'tcp', 'ws', 'grpc', 'http', 'https', 'h2',
+    'tls', 'xtls', 'reality', 'vision', 'flow',
+    'cdn', 'anycast', 'multi', 'mix',
+]
+
 # ============================================================
-# КЭШ ПИНГА (СОХРАНЯЕТСЯ МЕЖДУ ЗАПРОСАМИ)
+# КЭШ ПИНГА
 # ============================================================
 class PingCache:
     def __init__(self):
-        self.cache = {}  # host:port -> (ping, timestamp)
+        self.cache = {}
         self.lock = threading.Lock()
-        self.is_measuring = False
     
-    def get_cached_ping(self, host: str, port: int) -> float:
-        """Получает пинг из кэша"""
+    def get(self, host, port):
         key = f"{host}:{port}"
         with self.lock:
             if key in self.cache:
-                ping, timestamp = self.cache[key]
-                if (datetime.now() - timestamp).seconds < PING_CACHE_TTL:
+                ping, ts = self.cache[key]
+                if (datetime.now() - ts).seconds < PING_CACHE_TTL:
                     return ping
-        return None  # Нет в кэше
+        return None
     
-    def set_ping(self, host: str, port: int, ping: float):
-        """Сохраняет пинг в кэш"""
+    def set(self, host, port, ping):
         key = f"{host}:{port}"
         with self.lock:
             self.cache[key] = (ping, datetime.now())
     
-    def measure_async(self, servers: list):
-        """Асинхронное измерение пинга в отдельных потоках"""
-        def measure_and_cache(host, port):
+    def measure_async(self, servers):
+        def measure(host, port):
             try:
                 start = time.time()
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(2)  # Короткий таймаут
+                sock.settimeout(2)
                 sock.connect((host, int(port)))
                 ping = (time.time() - start) * 1000
                 sock.close()
-                self.set_ping(host, int(port), round(ping, 1))
+                self.set(host, int(port), round(ping, 1))
             except:
-                self.set_ping(host, int(port), float('inf'))
+                self.set(host, int(port), float('inf'))
         
-        threads = []
         for host, port in servers:
-            t = threading.Thread(target=measure_and_cache, args=(host, port))
+            t = threading.Thread(target=measure, args=(host, port))
             t.daemon = True
             t.start()
-            threads.append(t)
-        
-        # Не ждем завершения - пусть работают в фоне
-        return threads
 
-# Глобальный кэш пинга
 ping_cache = PingCache()
 
 # ============================================================
-# ФУНКЦИИ ОБРАБОТКИ
+# ФУНКЦИИ
 # ============================================================
+def extract_server_info(line):
+    m = re.search(r'@([\d.]+):(\d+)', line)
+    return (m.group(1), m.group(2)) if m else (None, None)
 
-def extract_server_info(config_line: str) -> tuple:
-    """Извлекает IP и порт из конфига"""
-    match = re.search(r'@([\d.]+):(\d+)', config_line)
-    if match:
-        return match.group(1), match.group(2)
-    return None, None
+def extract_original_name(line):
+    m = re.search(r'#([^#\n]+)$', line)
+    return m.group(1).strip() if m else ""
 
-def detect_server_type(config_line: str) -> str:
-    config_lower = config_line.lower()
-    if "anycast" in config_lower:
-        return "Anycast"
-    elif "cdn" in config_lower:
-        return "CDN"
-    elif "reality" in config_lower:
-        return "REALITY"
-    return None
-
-def extract_original_name(config_line: str) -> str:
-    match = re.search(r'#(.+)$', config_line)
-    if match:
-        return match.group(1).strip()
-    return ""
-
-def translate_location(text: str) -> str:
+def translate_all(text):
     result = text
     for eng, rus in LOCATION_TRANSLATIONS.items():
-        if eng in result:
-            result = result.replace(eng, rus)
+        pattern = re.compile(r'\b' + re.escape(eng) + r'\b', re.IGNORECASE)
+        result = pattern.sub(rus, result)
     return result
 
-def get_country_flag(location: str) -> str:
+def get_flag(text):
     for country, flag in COUNTRY_FLAGS.items():
-        if country in location:
+        if country in text:
             return flag
     return ""
 
-def get_speed_emoji(ping: float) -> str:
-    """Возвращает эмодзи скорости"""
-    if ping is None:
-        return "📡"  # Пинг еще не измерен
-    if ping == float('inf'):
-        return "❌"
-    elif ping < 50:
-        return "⚡"
-    elif ping < 100:
-        return "🚀"
-    elif ping < 200:
-        return "🐌"
-    else:
-        return "💀"
-
-def get_ping_text(ping: float) -> str:
-    """Возвращает текст пинга"""
-    if ping is None:
-        return "измеряется..."
-    if ping == float('inf'):
-        return "нет ответа"
-    return f"{ping:.0f}ms"
-
-def create_enhanced_name(config_line: str, ping: float, is_premium: bool = False) -> str:
-    """Создает улучшенное название (быстро, без задержек)"""
-    server_type = detect_server_type(config_line)
-    original_name = extract_original_name(config_line)
-    translated = translate_location(original_name)
-    country_flag = get_country_flag(translated)
+def shorten_name(name):
+    name = translate_all(name)
+    parts = name.replace('-', ' ').replace('_', ' ').split()
     
-    # Иконка
+    clean = []
+    for p in parts:
+        if p.lower() not in REMOVE_WORDS and not p.isdigit():
+            clean.append(p)
+    
+    city, country = "", ""
+    for p in clean:
+        if p in COUNTRY_FLAGS:
+            country = p
+        else:
+            for loc in LOCATION_TRANSLATIONS.values():
+                if p == loc and loc not in COUNTRY_FLAGS:
+                    city = p
+                    break
+    
+    flag = get_flag(name)
+    
+    if city and country:
+        result = f"{city} {flag}"
+    elif country:
+        result = f"{country} {flag}"
+    elif city:
+        result = city
+    else:
+        result = ' '.join(clean[:2]) if len(clean) >= 2 else clean[0] if clean else name[:20]
+    
+    if len(result) > 30:
+        result = result[:27] + "..."
+    
+    return result.strip()
+
+def create_enhanced_name(line, ping, is_premium=False):
+    original_name = extract_original_name(line)
+    short_name = shorten_name(original_name)
+    
+    line_lower = line.lower()
     if is_premium:
         icon = "💎"
-    elif server_type == "Anycast":
+    elif "anycast" in line_lower:
         icon = "🌍"
-    elif server_type == "CDN":
+    elif "cdn" in line_lower:
         icon = "📡"
-    elif server_type == "REALITY":
+    elif "reality" in line_lower:
         icon = "🔒"
     else:
         icon = "🌐"
     
-    speed_emoji = get_speed_emoji(ping)
-    ping_text = get_ping_text(ping)
-    
-    # Чистое название
-    clean_name = translated.replace('-', ' ').replace('_', ' ').strip()
-    clean_name = ' '.join(clean_name.split())
-    
-    # Формируем название
-    if server_type:
-        display_name = f"{icon} {server_type} | {clean_name} {country_flag} | {speed_emoji} {ping_text}"
+    if ping is None:
+        ping_str = ""
+    elif ping == float('inf'):
+        ping_str = "❌"
+    elif ping < 50:
+        ping_str = f"⚡{ping:.0f}ms"
+    elif ping < 100:
+        ping_str = f"🚀{ping:.0f}ms"
+    elif ping < 200:
+        ping_str = f"🐌{ping:.0f}ms"
     else:
-        display_name = f"{icon} {clean_name} {country_flag} | {speed_emoji} {ping_text}"
+        ping_str = f"💀{ping:.0f}ms"
     
-    if len(display_name) > 80:
-        display_name = display_name[:77] + "..."
+    if ping_str:
+        display = f"{icon} {short_name} | {ping_str}"
+    else:
+        display = f"{icon} {short_name}"
     
-    return display_name
+    if len(display) > 40:
+        display = display[:37] + "..."
+    
+    return display
 
-def process_configs_fast(raw_content: bytes, user_id: int = None, is_premium: bool = False) -> bytes:
-    """
-    БЫСТРАЯ обработка конфигов без ожидания пинга
-    Использует кэшированный пинг, если есть
-    Запускает измерение пинга в фоне
-    """
+def process_configs_fast(raw, is_premium=False):
     try:
-        content = raw_content.decode('utf-8', errors='ignore')
+        content = raw.decode('utf-8', errors='ignore')
         lines = content.split('\n')
         
-        config_lines = []
-        servers_to_measure = []
+        configs = []
+        servers = []
         
         for line in lines:
             line = line.strip()
             if line.startswith(('vless://', 'trojan://', 'vmess://', 'ss://', 'hysteria://', 'tuic://')):
-                config_lines.append(line)
+                configs.append(line)
                 host, port = extract_server_info(line)
                 if host and port:
-                    servers_to_measure.append((host, port))
+                    servers.append((host, port))
         
-        # Запускаем измерение пинга В ФОНЕ (не ждем)
-        if servers_to_measure:
-            ping_cache.measure_async(servers_to_measure)
+        if servers:
+            ping_cache.measure_async(servers)
         
-        # Формируем результат МГНОВЕННО
-        result_lines = []
-        current_time = datetime.now().strftime('%H:%M')
-        premium_text = "Premium" if is_premium else "Standard"
+        result = []
+        # Статический заголовок
+        result.append(f"#profile-title: {'CBN VPN Premium' if is_premium else 'CBN VPN'}")
+        result.append("#profile-update-interval: 6")
+        result.append("")
         
-        # Заголовок
-        result_lines.append(f"#profile-title: CBN VPN {premium_text} | {current_time}")
-        result_lines.append(f"#profile-update-interval: 6")
-        result_lines.append("")
-        
-        seen_hashes = set()
-        
-        for line in config_lines:
-            config_hash = line[:100]
-            if config_hash in seen_hashes:
+        seen = set()
+        for line in configs:
+            base = line[:line.rfind('#')] if '#' in line else line[:80]
+            if base in seen:
                 continue
-            seen_hashes.add(config_hash)
+            seen.add(base)
             
-            # Получаем пинг из кэша (мгновенно)
             host, port = extract_server_info(line)
-            if host and port:
-                ping = ping_cache.get_cached_ping(host, int(port))
-            else:
-                ping = None
+            ping = ping_cache.get(host, int(port)) if host and port else None
+            name = create_enhanced_name(line, ping, is_premium)
             
-            # Создаем название
-            enhanced_name = create_enhanced_name(line, ping, is_premium)
-            
-            # Заменяем название
             if '#' in line:
-                base = line[:line.rfind('#')]
-                new_config = f"{base}#{enhanced_name}"
+                new_config = f"{line[:line.rfind('#')]}#{name}"
             else:
-                new_config = f"{line}#{enhanced_name}"
+                new_config = f"{line}#{name}"
             
-            result_lines.append(new_config)
+            result.append(new_config)
         
-        return '\n'.join(result_lines).encode('utf-8')
-        
+        return '\n'.join(result).encode('utf-8')
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        import traceback
-        traceback.print_exc()
-        return raw_content
+        print(f"Error: {e}")
+        return raw
 
 # ============================================================
-# СОСТОЯНИЕ ПОЛЬЗОВАТЕЛЕЙ
+# СОСТОЯНИЕ
 # ============================================================
-_premium_users: dict[int, bool] = {}
-_banned_users: dict[int, bool] = {}
-_state_lock = threading.Lock()
+_premium = {}
+_banned = {}
+_lock = threading.Lock()
 
-def set_premium(user_id: int, status: bool):
-    with _state_lock:
-        _premium_users[user_id] = status
+def set_premium(uid, s):
+    with _lock: _premium[uid] = s
 
-def set_banned(user_id: int, status: bool):
-    with _state_lock:
-        _banned_users[user_id] = status
-        if status:
-            _premium_users[user_id] = False
+def set_banned(uid, s):
+    with _lock:
+        _banned[uid] = s
+        if s: _premium[uid] = False
 
-def is_premium_user(user_id: int) -> bool:
-    with _state_lock:
-        if _banned_users.get(user_id):
-            return False
-        return _premium_users.get(user_id, False)
+def is_premium_user(uid):
+    with _lock:
+        return False if _banned.get(uid) else _premium.get(uid, False)
 
-def is_banned_user(user_id: int) -> bool:
-    with _state_lock:
-        return _banned_users.get(user_id, False)
+def is_banned_user(uid):
+    with _lock:
+        return _banned.get(uid, False)
 
 # ============================================================
 # КЭШ КОНФИГОВ
 # ============================================================
-_raw_cache = {}
-_raw_cache_lock = threading.Lock()
+_raw = {}
+_raw_lock = threading.Lock()
 
-def _download(url: str, timeout: int = 20, retries: int = 2) -> bytes:
-    """Быстрая загрузка с коротким таймаутом"""
-    last_err = None
-    for attempt in range(retries):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
-        except Exception as e:
-            last_err = e
-            if attempt < retries - 1:
-                time.sleep(1)
-    raise last_err
-
-def get_raw_config(url: str) -> bytes:
-    cache_key = url
-    with _raw_cache_lock:
-        if cache_key in _raw_cache:
-            data, timestamp = _raw_cache[cache_key]
-            if time.time() - timestamp < CACHE_TTL:
+def get_raw(url):
+    with _raw_lock:
+        if url in _raw:
+            data, ts = _raw[url]
+            if time.time() - ts < CACHE_TTL:
                 return data
-    
-    data = _download(url)
-    with _raw_cache_lock:
-        _raw_cache[cache_key] = (data, time.time())
-    
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    data = urllib.request.urlopen(req, timeout=20).read()
+    with _raw_lock:
+        _raw[url] = (data, time.time())
     return data
 
 # ============================================================
-# ФОНОВЫЕ ЗАДАЧИ
+# ФОН
 # ============================================================
-def background_ping_measurement():
-    """Фоновое измерение пинга всех серверов каждые 5 минут"""
+def bg_ping():
     while True:
         try:
-            print(f"[ping] Фоновое измерение пинга...")
-            raw = get_raw_config(VPN_CONFIG_URL)
+            raw = get_raw(VPN_CONFIG_URL)
             content = raw.decode('utf-8', errors='ignore')
-            
             servers = []
             for line in content.split('\n'):
-                line = line.strip()
                 if line.startswith(('vless://', 'trojan://', 'vmess://')):
                     host, port = extract_server_info(line)
                     if host and port:
                         servers.append((host, port))
-            
             if servers:
-                # Запускаем измерение и ждем (это фоновый процесс)
-                threads = ping_cache.measure_async(servers)
-                for t in threads:
-                    t.join(timeout=3)
-                print(f"[ping] Измерено {len(servers)} серверов")
-        except Exception as e:
-            print(f"[ping] Ошибка: {e}")
-        
-        time.sleep(300)  # Каждые 5 минут
+                ping_cache.measure_async(servers)
+        except: pass
+        time.sleep(300)
 
 def keep_alive():
     while True:
         time.sleep(600)
-        try:
-            urllib.request.urlopen(RENDER_URL + "/health", timeout=10)
-        except:
-            pass
+        try: urllib.request.urlopen(RENDER_URL + "/health", timeout=10)
+        except: pass
 
-def refresh_raw_cache():
+def refresh_cache():
     while True:
         time.sleep(CACHE_TTL)
         try:
-            _download(VPN_CONFIG_URL)
-            _download(OBHOD_CONFIG_URL)
-        except:
-            pass
+            urllib.request.urlopen(VPN_CONFIG_URL, timeout=20)
+            urllib.request.urlopen(OBHOD_CONFIG_URL, timeout=20)
+        except: pass
 
 threading.Thread(target=keep_alive, daemon=True).start()
-threading.Thread(target=refresh_raw_cache, daemon=True).start()
-threading.Thread(target=background_ping_measurement, daemon=True).start()
+threading.Thread(target=refresh_cache, daemon=True).start()
+threading.Thread(target=bg_ping, daemon=True).start()
 
 # ============================================================
 # МАРШРУТЫ
@@ -416,136 +395,92 @@ threading.Thread(target=background_ping_measurement, daemon=True).start()
 
 @app.route('/<int:user_id>')
 def serve_vpn(user_id):
-    """Отдает VPN конфиг МГНОВЕННО"""
+    """Обычная подписка CBN VPN"""
     if is_banned_user(user_id):
         return '', 200
-    
     try:
-        is_premium = is_premium_user(user_id)
-        # Используем быструю обработку без ожидания пинга
-        content = process_configs_fast(
-            get_raw_config(VPN_CONFIG_URL), 
-            user_id, 
-            is_premium
-        )
-        
-        return Response(
-            content, 
-            status=200, 
-            headers={
-                "Content-Type": "text/plain; charset=utf-8",
-                "Cache-Control": "public, max-age=60",  # Кэширование на 1 минуту
-            }
-        )
-    except Exception as e:
-        print(f"Error: {e}")
-        # В случае ошибки отдаем сырой конфиг
+        is_prem = is_premium_user(user_id)
+        content = process_configs_fast(get_raw(VPN_CONFIG_URL), is_prem)
+        title = "CBN VPN Premium" if is_prem else "CBN VPN"
+        return Response(content, status=200, headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "public, max-age=60",
+            "profile-title": title,
+        })
+    except:
         try:
-            raw = get_raw_config(VPN_CONFIG_URL)
-            return Response(raw, status=200, headers={"Content-Type": "text/plain; charset=utf-8"})
+            return Response(get_raw(VPN_CONFIG_URL), status=200, headers={
+                "Content-Type": "text/plain; charset=utf-8",
+                "profile-title": "CBN VPN",
+            })
         except:
-            return "Server error", 502
+            return "Error", 502
 
 @app.route('/<int:user_id>/obs')
 def serve_obs(user_id):
-    """Отдает OBS конфиг МГНОВЕННО"""
+    """Премиум/OBS подписка CBN VPN Premium"""
     if is_banned_user(user_id):
         return '', 200
-    
     if not is_premium_user(user_id):
         return redirect(VPN_CONFIG_URL, code=302)
-    
     try:
-        content = process_configs_fast(
-            get_raw_config(OBHOD_CONFIG_URL), 
-            user_id, 
-            True
-        )
-        
-        return Response(
-            content, 
-            status=200, 
-            headers={
-                "Content-Type": "text/plain; charset=utf-8",
-                "Cache-Control": "public, max-age=60",
-            }
-        )
-    except Exception as e:
-        print(f"Error: {e}")
-        try:
-            raw = get_raw_config(OBHOD_CONFIG_URL)
-            return Response(raw, status=200, headers={"Content-Type": "text/plain; charset=utf-8"})
-        except:
-            return redirect(OBHOD_CONFIG_URL, code=302)
+        content = process_configs_fast(get_raw(OBHOD_CONFIG_URL), True)
+        return Response(content, status=200, headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "public, max-age=60",
+            "profile-title": "CBN VPN Premium",
+        })
+    except:
+        return redirect(OBHOD_CONFIG_URL, code=302)
 
 @app.route('/health')
 def health():
-    return {"status": "ok", "timestamp": time.time()}, 200
+    return {"status": "ok"}, 200
 
 @app.route('/')
 def root():
-    return f"CBN VPN Server | {datetime.now().strftime('%H:%M')}", 200
+    return "CBN VPN Server", 200
 
 # ============================================================
 # ADMIN API
 # ============================================================
-@app.route('/set_premium/<int:user_id>/<int:status>', methods=['POST'])
-def api_set_premium(user_id, status):
-    if request.headers.get('X-Secret', '') != SECRET_KEY:
-        return 'Forbidden', 403
-    set_premium(user_id, bool(status))
+@app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
+def api_sp(uid, status):
+    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
+    set_premium(uid, bool(status))
     return 'OK', 200
 
-@app.route('/unban_user/<int:user_id>', methods=['POST'])
-def api_unban_user(user_id):
-    if request.headers.get('X-Secret', '') != SECRET_KEY:
-        return 'Forbidden', 403
-    set_banned(user_id, False)
+@app.route('/unban_user/<int:uid>', methods=['POST'])
+def api_ub(uid):
+    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
+    set_banned(uid, False)
     return 'OK', 200
 
-@app.route('/delete_user/<int:user_id>', methods=['POST'])
-def api_delete_user(user_id):
-    if request.headers.get('X-Secret', '') != SECRET_KEY:
-        return 'Forbidden', 403
-    set_banned(user_id, True)
+@app.route('/delete_user/<int:uid>', methods=['POST'])
+def api_du(uid):
+    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
+    set_banned(uid, True)
     return 'OK', 200
 
 @app.route('/sync', methods=['POST'])
 def api_sync():
-    if request.headers.get('X-Secret', '') != SECRET_KEY:
-        return 'Forbidden', 403
-    
+    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
     data = request.get_json(silent=True)
-    if not data:
-        return 'Bad JSON', 400
-    
-    premium_ids = set(int(i) for i in data.get('premium', []))
-    banned_ids = set(int(i) for i in data.get('banned', []))
-    
-    with _state_lock:
-        _premium_users.clear()
-        _banned_users.clear()
-        for uid in premium_ids:
-            _premium_users[uid] = True
-        for uid in banned_ids:
-            _banned_users[uid] = True
-    
+    if not data: return 'Bad JSON', 400
+    with _lock:
+        _premium.clear()
+        _banned.clear()
+        for uid in data.get('premium', []): _premium[int(uid)] = True
+        for uid in data.get('banned', []): _banned[int(uid)] = True
     return 'OK', 200
 
 @app.route('/flush_cache', methods=['POST'])
-def flush_cache():
-    if request.headers.get('X-Secret', '') != SECRET_KEY:
-        return 'Forbidden', 403
-    
-    with _raw_cache_lock:
-        _raw_cache.clear()
-    
+def api_fc():
+    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
+    with _raw_lock: _raw.clear()
     return 'OK', 200
 
 if __name__ == '__main__':
-    print("=" * 50)
-    print("CBN VPN Server v2.0")
+    print("CBN VPN Server v3.2")
     print(f"Time: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
-    print("Features: Fast response, Async ping, Cross-platform")
-    print("=" * 50)
     app.run(host='0.0.0.0', port=5000, debug=False)
