@@ -1,19 +1,13 @@
 """
-CBN VPN Server - v5.0
-- Без пинга (не нужен)
-- Красивые названия
-- Премиум подписка переименовывается
-- Anycast: 🌍 Anycast
-- Остальные: 📡 Город 🇫🇮
+CBN VPN Server - STATELESS VERSION
+Теперь состояние хранится только в памяти и синхронизируется с ботом.
+При перезапуске сервер получает состояние от бота через /sync.
 """
 
 import urllib.request
 import threading
 import time
-import re
-import base64
 import json
-from datetime import datetime
 from flask import Flask, request, Response, redirect
 
 app = Flask(__name__)
@@ -24,305 +18,127 @@ RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
 
-# ============================================================
-# СЛОВАРЬ ГОРОДОВ
-# ============================================================
-CITY_DATA = {
-    "amsterdam": ("Амстердам", "🇳🇱"),
-    "frankfurt": ("Франкфурт", "🇩🇪"),
-    "helsinki": ("Хельсинки", "🇫🇮"),
-    "stockholm": ("Стокгольм", "🇸🇪"),
-    "oslo": ("Осло", "🇳🇴"),
-    "zurich": ("Цюрих", "🇨🇭"),
-    "paris": ("Париж", "🇫🇷"),
-    "london": ("Лондон", "🇬🇧"),
-    "moscow": ("Москва", "🇷🇺"),
-    "st petersburg": ("СПб", "🇷🇺"),
-    "saint petersburg": ("СПб", "🇷🇺"),
-    "kiev": ("Киев", "🇺🇦"),
-    "warsaw": ("Варшава", "🇵🇱"),
-    "madrid": ("Мадрид", "🇪🇸"),
-    "barcelona": ("Барселона", "🇪🇸"),
-    "rome": ("Рим", "🇮🇹"),
-    "milan": ("Милан", "🇮🇹"),
-    "vienna": ("Вена", "🇦🇹"),
-    "prague": ("Прага", "🇨🇿"),
-    "berlin": ("Берлин", "🇩🇪"),
-    "munich": ("Мюнхен", "🇩🇪"),
-    "hamburg": ("Гамбург", "🇩🇪"),
-    "lisbon": ("Лиссабон", "🇵🇹"),
-    "dublin": ("Дублин", "🇮🇪"),
-    "copenhagen": ("Копенгаген", "🇩🇰"),
-    "brussels": ("Брюссель", "🇧🇪"),
-    "budapest": ("Будапешт", "🇭🇺"),
-    "bucharest": ("Бухарест", "🇷🇴"),
-    "sofia": ("София", "🇧🇬"),
-    "athens": ("Афины", "🇬🇷"),
-    "riga": ("Рига", "🇱🇻"),
-    "tallinn": ("Таллин", "🇪🇪"),
-    "vilnius": ("Вильнюс", "🇱🇹"),
-    "belgrade": ("Белград", "🇷🇸"),
-    "bratislava": ("Братислава", "🇸🇰"),
-    "ljubljana": ("Любляна", "🇸🇮"),
-    "zagreb": ("Загреб", "🇭🇷"),
-    "istanbul": ("Стамбул", "🇹🇷"),
-    "dubai": ("Дубай", "🇦🇪"),
-    "tokyo": ("Токио", "🇯🇵"),
-    "osaka": ("Осака", "🇯🇵"),
-    "seoul": ("Сеул", "🇰🇷"),
-    "busan": ("Пусан", "🇰🇷"),
-    "sydney": ("Сидней", "🇦🇺"),
-    "melbourne": ("Мельбурн", "🇦🇺"),
-    "toronto": ("Торонто", "🇨🇦"),
-    "vancouver": ("Ванкувер", "🇨🇦"),
-    "new york": ("Нью-Йорк", "🇺🇸"),
-    "los angeles": ("Лос-Анджелес", "🇺🇸"),
-    "chicago": ("Чикаго", "🇺🇸"),
-    "dallas": ("Даллас", "🇺🇸"),
-    "miami": ("Майами", "🇺🇸"),
-    "seattle": ("Сиэтл", "🇺🇸"),
-    "san francisco": ("Сан-Франциско", "🇺🇸"),
-    "sao paulo": ("Сан-Паулу", "🇧🇷"),
-    "rio de janeiro": ("Рио", "🇧🇷"),
-    "mexico city": ("Мехико", "🇲🇽"),
-    "buenos aires": ("Буэнос-Айрес", "🇦🇷"),
-    "santiago": ("Сантьяго", "🇨🇱"),
-    "lima": ("Лима", "🇵🇪"),
-    "bogota": ("Богота", "🇨🇴"),
-    "singapore": ("Сингапур", "🇸🇬"),
-    "hong kong": ("Гонконг", "🇭🇰"),
-    "taipei": ("Тайбэй", "🇹🇼"),
-    "mumbai": ("Мумбаи", "🇮🇳"),
-    "delhi": ("Дели", "🇮🇳"),
-    "bangalore": ("Бангалор", "🇮🇳"),
-    "tel aviv": ("Тель-Авив", "🇮🇱"),
-    "jakarta": ("Джакарта", "🇮🇩"),
-    "bangkok": ("Бангкок", "🇹🇭"),
-    "kuala lumpur": ("Куала-Лумпур", "🇲🇾"),
-    "manila": ("Манила", "🇵🇭"),
-    "ho chi minh": ("Хошимин", "🇻🇳"),
-    "hanoi": ("Ханой", "🇻🇳"),
+# ─── СОСТОЯНИЕ ТОЛЬКО В ПАМЯТИ ────────────────────────────
+_premium_users: dict[int, bool] = {}
+_banned_users: dict[int, bool] = {}
+_state_lock = threading.Lock()
+
+def set_premium(user_id: int, status: bool):
+    with _state_lock:
+        _premium_users[user_id] = status
+    print(f"[state] premium user={user_id} status={status}")
+
+def set_banned(user_id: int, status: bool):
+    with _state_lock:
+        _banned_users[user_id] = status
+        if status:
+            # При бане сбрасываем премиум
+            _premium_users[user_id] = False
+        else:
+            # При разбане очищаем запись о бане
+            if user_id in _banned_users:
+                del _banned_users[user_id]
+    print(f"[state] ban user={user_id} status={status}")
+
+def is_premium_user(user_id: int) -> bool:
+    with _state_lock:
+        if _banned_users.get(user_id):
+            return False
+        return _premium_users.get(user_id, False)
+
+def is_banned_user(user_id: int) -> bool:
+    with _state_lock:
+        return _banned_users.get(user_id, False)
+
+# ─── КЕШ КОНФИГОВ ─────────────────────────────────────────
+_cache = {
+    "vpn":  {"data": None, "updated_at": 0, "updating": False},
+    "obs":  {"data": None, "updated_at": 0, "updating": False},
 }
+_cache_lock = threading.Lock()
 
-def extract_host_port(line):
-    # VLESS/Trojan
-    m = re.search(r'@([\d.]+):(\d+)', line)
-    if m:
-        return m.group(1), m.group(2)
-    
-    # VMess base64
-    if line.startswith('vmess://'):
+def _download(url: str, timeout: int = 30, retries: int = 3) -> bytes:
+    last_err = None
+    for attempt in range(retries):
         try:
-            b64 = line[8:]
-            padding = 4 - len(b64) % 4
-            if padding != 4:
-                b64 += '=' * padding
-            decoded = base64.b64decode(b64).decode('utf-8')
-            data = json.loads(decoded)
-            return data.get('add'), str(data.get('port', '443'))
-        except:
-            pass
-    
-    return None, None
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+    raise last_err
 
-def extract_name(line):
-    # Имя после #
-    m = re.search(r'#([^#\n]+)$', line)
-    if m:
-        return m.group(1).strip()
-    
-    # VMess ps
-    if line.startswith('vmess://'):
-        try:
-            b64 = line[8:]
-            padding = 4 - len(b64) % 4
-            if padding != 4:
-                b64 += '=' * padding
-            decoded = base64.b64decode(b64).decode('utf-8')
-            data = json.loads(decoded)
-            return data.get('ps', '')
-        except:
-            pass
-    
-    return ""
-
-def is_anycast(line):
-    low = line.lower()
-    name = extract_name(line).lower()
-    return 'anycast' in low or 'anycast' in name
-
-def is_cdn(line):
-    low = line.lower()
-    name = extract_name(line).lower()
-    return 'cdn' in low or 'cdn' in name
-
-def is_reality(line):
-    return 'reality' in line.lower()
-
-def get_server_icon(line):
-    if is_anycast(line):
-        return "🌍"
-    elif is_cdn(line):
-        return "📡"
-    elif is_reality(line):
-        return "🔒"
-    else:
-        return "🌐"
-
-def find_city(name):
-    name_lower = name.lower().replace('-', ' ').replace('_', ' ')
-    
-    for city_key, (rus, flag) in CITY_DATA.items():
-        if city_key in name_lower:
-            return rus, flag
-    
-    # Не нашли - берем первое слово
-    words = [w for w in name_lower.split() if len(w) > 2]
-    if words:
-        return words[0].capitalize(), ""
-    
-    return name[:12], ""
-
-def create_name(line):
-    name = extract_name(line)
-    icon = get_server_icon(line)
-    
-    # Anycast
-    if is_anycast(line):
-        return f"{icon} Anycast"
-    
-    # Остальные - Город Флаг
-    city, flag = find_city(name)
-    if flag:
-        return f"{icon} {city} {flag}"
-    return f"{icon} {city}"
-
-def process_configs(raw, is_premium=False):
+def _warm_one(key: str, url: str):
     try:
-        content = raw.decode('utf-8', errors='ignore')
-        lines = content.split('\n')
-        
-        configs = []
-        
-        for line in lines:
-            line = line.strip()
-            if line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'tuic://')):
-                configs.append(line)
-        
-        result = []
-        result.append("#profile-title: CBN VPN Premium" if is_premium else "#profile-title: CBN VPN")
-        result.append("#profile-update-interval: 6")
-        result.append("")
-        
-        seen = set()
-        
-        for line in configs:
-            # Убираем query для проверки дубликатов
-            clean = re.sub(r'\?.*$', '', line)
-            if '#' in clean:
-                clean = clean[:clean.rfind('#')]
-            
-            if clean in seen:
-                continue
-            seen.add(clean)
-            
-            name = create_name(line)
-            
-            # Собираем конфиг
-            if '#' in line:
-                base = line[:line.rfind('#')]
-            else:
-                base = line
-            
-            base = re.sub(r'#[^#]*$', '', base)
-            result.append(f"{base}#{name}")
-        
-        return '\n'.join(result).encode('utf-8')
+        data = _download(url)
+        with _cache_lock:
+            _cache[key]["data"] = data
+            _cache[key]["updated_at"] = time.time()
+            _cache[key]["updating"] = False
+        print(f"[cache] Обновлён {key}: {len(data)} байт")
     except Exception as e:
-        print(f"Error: {e}")
-        return raw
+        with _cache_lock:
+            _cache[key]["updating"] = False
+        print(f"[cache] Не удалось скачать {key}: {e}")
 
-# ============================================================
-# СОСТОЯНИЕ
-# ============================================================
-_premium = {}
-_banned = {}
-_lock = threading.Lock()
+def get_config(key: str, url: str) -> bytes:
+    with _cache_lock:
+        entry = _cache[key]
+        cache_has_data = entry["data"] is not None
+        cache_fresh = cache_has_data and (time.time() - entry["updated_at"]) < CACHE_TTL
+        already_updating = entry.get("updating", False)
 
-def set_premium(uid, s):
-    with _lock: _premium[uid] = s
+    if cache_fresh:
+        return entry["data"]
 
-def set_banned(uid, s):
-    with _lock:
-        _banned[uid] = s
-        if s: _premium[uid] = False
+    if cache_has_data and not already_updating:
+        with _cache_lock:
+            _cache[key]["updating"] = True
+        threading.Thread(target=_warm_one, args=(key, url), daemon=True).start()
+        return entry["data"]
 
-def is_premium_user(uid):
-    with _lock:
-        return False if _banned.get(uid) else _premium.get(uid, False)
+    try:
+        data = _download(url)
+        with _cache_lock:
+            _cache[key]["data"] = data
+            _cache[key]["updated_at"] = time.time()
+            _cache[key]["updating"] = False
+        return data
+    except Exception as e:
+        print(f"[cache] Не удалось скачать {key}: {e}")
+        raise
 
-def is_banned_user(uid):
-    with _lock:
-        return _banned.get(uid, False)
+def _refresh_cache():
+    threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True).start()
+    threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True).start()
+    while True:
+        time.sleep(CACHE_TTL)
+        threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True).start()
+        threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True).start()
 
-# ============================================================
-# КЭШ
-# ============================================================
-_raw = {}
-_raw_lock = threading.Lock()
-
-def get_raw(url):
-    with _raw_lock:
-        if url in _raw:
-            data, ts = _raw[url]
-            if time.time() - ts < CACHE_TTL:
-                return data
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    data = urllib.request.urlopen(req, timeout=20).read()
-    with _raw_lock:
-        _raw[url] = (data, time.time())
-    return data
-
-# ============================================================
-# ФОН
-# ============================================================
 def keep_alive():
     while True:
         time.sleep(600)
-        try: urllib.request.urlopen(RENDER_URL + "/health", timeout=10)
-        except: pass
-
-def refresh_cache():
-    while True:
-        time.sleep(CACHE_TTL)
         try:
-            urllib.request.urlopen(VPN_CONFIG_URL, timeout=20)
-            urllib.request.urlopen(OBHOD_CONFIG_URL, timeout=20)
-        except: pass
+            urllib.request.urlopen(RENDER_URL + "/health", timeout=10)
+        except Exception:
+            pass
 
 threading.Thread(target=keep_alive, daemon=True).start()
-threading.Thread(target=refresh_cache, daemon=True).start()
+threading.Thread(target=_refresh_cache, daemon=True).start()
 
-# ============================================================
-# МАРШРУТЫ
-# ============================================================
+# ─── МАРШРУТЫ ─────────────────────────────────────────────
 @app.route('/<int:user_id>')
 def serve_vpn(user_id):
     if is_banned_user(user_id):
         return '', 200
     try:
-        is_prem = is_premium_user(user_id)
-        content = process_configs(get_raw(VPN_CONFIG_URL), is_prem)
-        title = "CBN VPN Premium" if is_prem else "CBN VPN"
-        return Response(content, status=200, headers={
-            "Content-Type": "text/plain; charset=utf-8",
-            "profile-title": title,
-        })
-    except:
-        return Response(get_raw(VPN_CONFIG_URL), status=200, headers={
-            "Content-Type": "text/plain; charset=utf-8",
-            "profile-title": "CBN VPN",
-        })
+        content = get_config("vpn", VPN_CONFIG_URL)
+    except Exception as e:
+        return f"upstream error: {e}", 502
+    return Response(content, status=200, headers={"Content-Type": "text/plain; charset=utf-8", "profile-title": "CBN VPN", "Cache-Control": "no-store, no-cache, must-revalidate"})
 
 @app.route('/<int:user_id>/obs')
 def serve_obs(user_id):
@@ -331,62 +147,108 @@ def serve_obs(user_id):
     if not is_premium_user(user_id):
         return redirect(VPN_CONFIG_URL, code=302)
     try:
-        # ВАЖНО: is_premium=True для OBS
-        content = process_configs(get_raw(OBHOD_CONFIG_URL), True)
-        return Response(content, status=200, headers={
-            "Content-Type": "text/plain; charset=utf-8",
-            "profile-title": "CBN VPN Premium",
-        })
-    except:
+        data = _download(OBHOD_CONFIG_URL, timeout=10, retries=1)
+        return Response(data, status=200, headers={"Content-Type": "text/plain; charset=utf-8", "profile-title": "CBN VPN Premium", "Cache-Control": "no-store, no-cache, must-revalidate"})
+    except Exception:
         return redirect(OBHOD_CONFIG_URL, code=302)
 
+# ─── HEALTH CHECK ─────────────────────────────────────────
 @app.route('/health')
 def health():
-    return {"status": "ok"}, 200
+    with _state_lock:
+        return {"status": "ok", "timestamp": time.time(), "premium": len(_premium_users), "banned": len(_banned_users)}, 200
 
 @app.route('/')
 def root():
-    return "CBN VPN Server v5", 200
+    with _state_lock:
+        return f"CBN VPN Server Online | premium={len(_premium_users)} banned={len(_banned_users)}", 200
 
-# ============================================================
-# ADMIN API
-# ============================================================
-@app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
-def api_sp(uid, status):
-    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
-    set_premium(uid, bool(status))
+# ─── ADMIN API ────────────────────────────────────────────
+@app.route('/set_premium/<int:user_id>/<int:status>', methods=['POST'])
+def api_set_premium(user_id, status):
+    secret = request.headers.get('X-Secret', '')
+    if secret != SECRET_KEY:
+        return 'Forbidden', 403
+    set_premium(user_id, bool(status))
     return 'OK', 200
 
-@app.route('/unban_user/<int:uid>', methods=['POST'])
-def api_ub(uid):
-    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
-    set_banned(uid, False)
+@app.route('/unban_user/<int:user_id>', methods=['POST'])
+def api_unban_user(user_id):
+    secret = request.headers.get('X-Secret', '')
+    if secret != SECRET_KEY:
+        return 'Forbidden', 403
+    set_banned(user_id, False)
     return 'OK', 200
 
-@app.route('/delete_user/<int:uid>', methods=['POST'])
-def api_du(uid):
-    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
-    set_banned(uid, True)
+@app.route('/delete_user/<int:user_id>', methods=['POST'])
+def api_delete_user(user_id):
+    secret = request.headers.get('X-Secret', '')
+    if secret != SECRET_KEY:
+        return 'Forbidden', 403
+    set_banned(user_id, True)
     return 'OK', 200
 
 @app.route('/sync', methods=['POST'])
 def api_sync():
-    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
+    secret = request.headers.get('X-Secret', '')
+    if secret != SECRET_KEY:
+        return 'Forbidden', 403
+    
     data = request.get_json(silent=True)
-    if not data: return 'Bad JSON', 400
-    with _lock:
-        _premium.clear()
-        _banned.clear()
-        for uid in data.get('premium', []): _premium[int(uid)] = True
-        for uid in data.get('banned', []): _banned[int(uid)] = True
+    if not data:
+        return 'Bad JSON', 400
+    
+    premium_ids = set(int(i) for i in data.get('premium', []))
+    banned_ids = set(int(i) for i in data.get('banned', []))
+    
+    with _state_lock:
+        _premium_users.clear()
+        _banned_users.clear()
+        for uid in premium_ids:
+            _premium_users[uid] = True
+        for uid in banned_ids:
+            _banned_users[uid] = True
+    
+    print(f"[state] sync: {len(premium_ids)} premium, {len(banned_ids)} banned")
     return 'OK', 200
 
 @app.route('/flush_cache', methods=['POST'])
-def api_fc():
-    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
-    with _raw_lock: _raw.clear()
-    return 'OK', 200
+def flush_cache():
+    secret = request.headers.get('X-Secret', '')
+    if secret != SECRET_KEY:
+        return 'Forbidden', 403
+    
+    with _cache_lock:
+        for key in _cache:
+            _cache[key]["data"] = None
+            _cache[key]["updated_at"] = 0
+            _cache[key]["updating"] = False
+    
+    threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True).start()
+    threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True).start()
+    print("[cache] Принудительный сброс кэша выполнен")
+    return 'OK — cache flushed, reloading in background', 200
+
+@app.route('/check_batch', methods=['POST'])
+def api_check_batch():
+    """Проверка статуса для нескольких пользователей"""
+    secret = request.headers.get('X-Secret', '')
+    if secret != SECRET_KEY:
+        return 'Forbidden', 403
+    
+    data = request.get_json(silent=True)
+    if not data or 'user_ids' not in data:
+        return 'Bad request', 400
+    
+    results = {}
+    for user_id in data['user_ids']:
+        uid = int(user_id)
+        results[str(uid)] = {
+            'banned': is_banned_user(uid),
+            'premium': is_premium_user(uid)
+        }
+    
+    return results, 200
 
 if __name__ == '__main__':
-    print("CBN VPN Server v5.0")
     app.run(host='0.0.0.0', port=5000, debug=False)
