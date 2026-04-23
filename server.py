@@ -1,8 +1,8 @@
 """
-CBN VPN Server - v4.0
-- Простые названия для INCY
-- Город + флаг + пинг
-- Без лишних символов
+CBN VPN Server - v4.5
+- Anycast: 🌍 Anycast ⚡пинг (без локации)
+- Остальные: иконка Город Флаг пинг
+- Фикс VMess/OBS/всех протоколов
 """
 
 import urllib.request
@@ -10,8 +10,9 @@ import threading
 import time
 import re
 import socket
+import base64
+import json
 from datetime import datetime
-from collections import OrderedDict
 from flask import Flask, request, Response, redirect
 
 app = Flask(__name__)
@@ -21,11 +22,12 @@ OBHOD_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
+PING_TTL = 600
 
 # ============================================================
-# ПЕРЕВОДЫ ( city -> (rus_city, flag) )
+# СЛОВАРЬ ГОРОД -> (рус, флаг)
 # ============================================================
-CITY_MAP = {
+CITY_DATA = {
     "amsterdam": ("Амстердам", "🇳🇱"),
     "frankfurt": ("Франкфурт", "🇩🇪"),
     "helsinki": ("Хельсинки", "🇫🇮"),
@@ -35,9 +37,12 @@ CITY_MAP = {
     "paris": ("Париж", "🇫🇷"),
     "london": ("Лондон", "🇬🇧"),
     "moscow": ("Москва", "🇷🇺"),
+    "st petersburg": ("СПб", "🇷🇺"),
+    "saint petersburg": ("СПб", "🇷🇺"),
     "kiev": ("Киев", "🇺🇦"),
     "warsaw": ("Варшава", "🇵🇱"),
     "madrid": ("Мадрид", "🇪🇸"),
+    "barcelona": ("Барселона", "🇪🇸"),
     "rome": ("Рим", "🇮🇹"),
     "milan": ("Милан", "🇮🇹"),
     "vienna": ("Вена", "🇦🇹"),
@@ -58,128 +63,178 @@ CITY_MAP = {
     "vilnius": ("Вильнюс", "🇱🇹"),
     "belgrade": ("Белград", "🇷🇸"),
     "bratislava": ("Братислава", "🇸🇰"),
+    "ljubljana": ("Любляна", "🇸🇮"),
+    "zagreb": ("Загреб", "🇭🇷"),
     "istanbul": ("Стамбул", "🇹🇷"),
     "dubai": ("Дубай", "🇦🇪"),
     "tokyo": ("Токио", "🇯🇵"),
+    "osaka": ("Осака", "🇯🇵"),
     "seoul": ("Сеул", "🇰🇷"),
+    "busan": ("Пусан", "🇰🇷"),
     "sydney": ("Сидней", "🇦🇺"),
+    "melbourne": ("Мельбурн", "🇦🇺"),
     "toronto": ("Торонто", "🇨🇦"),
+    "vancouver": ("Ванкувер", "🇨🇦"),
     "new york": ("Нью-Йорк", "🇺🇸"),
     "los angeles": ("Лос-Анджелес", "🇺🇸"),
     "chicago": ("Чикаго", "🇺🇸"),
     "dallas": ("Даллас", "🇺🇸"),
     "miami": ("Майами", "🇺🇸"),
     "seattle": ("Сиэтл", "🇺🇸"),
+    "san francisco": ("Сан-Франциско", "🇺🇸"),
     "sao paulo": ("Сан-Паулу", "🇧🇷"),
+    "rio de janeiro": ("Рио", "🇧🇷"),
     "mexico city": ("Мехико", "🇲🇽"),
     "buenos aires": ("Буэнос-Айрес", "🇦🇷"),
     "santiago": ("Сантьяго", "🇨🇱"),
+    "lima": ("Лима", "🇵🇪"),
+    "bogota": ("Богота", "🇨🇴"),
     "singapore": ("Сингапур", "🇸🇬"),
     "hong kong": ("Гонконг", "🇭🇰"),
     "taipei": ("Тайбэй", "🇹🇼"),
     "mumbai": ("Мумбаи", "🇮🇳"),
     "delhi": ("Дели", "🇮🇳"),
+    "bangalore": ("Бангалор", "🇮🇳"),
     "tel aviv": ("Тель-Авив", "🇮🇱"),
-    "st petersburg": ("СПб", "🇷🇺"),
-    "saint petersburg": ("СПб", "🇷🇺"),
+    "jakarta": ("Джакарта", "🇮🇩"),
+    "bangkok": ("Бангкок", "🇹🇭"),
+    "kuala lumpur": ("Куала-Лумпур", "🇲🇾"),
+    "manila": ("Манила", "🇵🇭"),
+    "ho chi minh": ("Хошимин", "🇻🇳"),
+    "hanoi": ("Ханой", "🇻🇳"),
 }
 
-# Стандартные названия для неизвестных городов по странам
-COUNTRY_FLAGS = {
-    "netherlands": "🇳🇱", "germany": "🇩🇪", "finland": "🇫🇮",
-    "sweden": "🇸🇪", "norway": "🇳🇴", "switzerland": "🇨🇭",
-    "france": "🇫🇷", "uk": "🇬🇧", "usa": "🇺🇸",
-    "canada": "🇨🇦", "japan": "🇯🇵", "singapore": "🇸🇬",
-    "hong kong": "🇭🇰", "italy": "🇮🇹", "spain": "🇪🇸",
-    "poland": "🇵🇱", "latvia": "🇱🇻", "lithuania": "🇱🇹",
-    "estonia": "🇪🇪", "russia": "🇷🇺", "ukraine": "🇺🇦",
-    "turkey": "🇹🇷", "india": "🇮🇳", "brazil": "🇧🇷",
-    "australia": "🇦🇺", "austria": "🇦🇹", "belgium": "🇧🇪",
-    "czech": "🇨🇿", "denmark": "🇩🇰", "ireland": "🇮🇪",
-    "portugal": "🇵🇹", "romania": "🇷🇴", "slovakia": "🇸🇰",
-    "bulgaria": "🇧🇬", "croatia": "🇭🇷", "greece": "🇬🇷",
-    "hungary": "🇭🇺", "iceland": "🇮🇸", "luxembourg": "🇱🇺",
-    "serbia": "🇷🇸", "south korea": "🇰🇷", "taiwan": "🇹🇼",
-    "vietnam": "🇻🇳", "thailand": "🇹🇭", "malaysia": "🇲🇾",
-    "indonesia": "🇮🇩", "philippines": "🇵🇭", "mexico": "🇲🇽",
-    "argentina": "🇦🇷", "chile": "🇨🇱", "south africa": "🇿🇦",
-    "israel": "🇮🇱", "uae": "🇦🇪", "kazakhstan": "🇰🇿",
-    "belarus": "🇧🇾", "moldova": "🇲🇩", "georgia": "🇬🇪",
-    "cyprus": "🇨🇾", "malta": "🇲🇹", "slovenia": "🇸🇮",
-}
+# ============================================================
+# ФУНКЦИИ
+# ============================================================
 
-def extract_server_info(line):
+def extract_host_port(line):
+    """
+    Извлекает хост и порт из ЛЮБОГО типа конфига
+    VLESS/VMess/Trojan/SS
+    """
+    # VLESS/Trojan: @host:port
     m = re.search(r'@([\d.]+):(\d+)', line)
-    return (m.group(1), m.group(2)) if m else (None, None)
+    if m:
+        return m.group(1), m.group(2)
+    
+    # VMess в base64
+    if line.startswith('vmess://'):
+        try:
+            b64 = line[8:]
+            # Добавляем padding если нужно
+            padding = 4 - len(b64) % 4
+            if padding != 4:
+                b64 += '=' * padding
+            decoded = base64.b64decode(b64).decode('utf-8')
+            data = json.loads(decoded)
+            return data.get('add'), str(data.get('port', '443'))
+        except:
+            pass
+    
+    return None, None
 
-def extract_original_name(line):
-    """Извлекает оригинальное название из конфига"""
+def extract_name(line):
+    """Извлекает название из конфига"""
+    # Ищем #name в конце
     m = re.search(r'#([^#\n]+)$', line)
-    return m.group(1).strip() if m else ""
+    if m:
+        return m.group(1).strip()
+    
+    # Для VMess имя в JSON
+    if line.startswith('vmess://'):
+        try:
+            b64 = line[8:]
+            padding = 4 - len(b64) % 4
+            if padding != 4:
+                b64 += '=' * padding
+            decoded = base64.b64decode(b64).decode('utf-8')
+            data = json.loads(decoded)
+            return data.get('ps', '')
+        except:
+            pass
+    
+    return ""
+
+def is_anycast(line):
+    """Проверяет, Anycast ли это"""
+    low = line.lower()
+    name = extract_name(line).lower()
+    return 'anycast' in low or 'anycast' in name
+
+def is_cdn(line):
+    low = line.lower()
+    name = extract_name(line).lower()
+    return 'cdn' in low or 'cdn' in name
+
+def is_reality(line):
+    low = line.lower()
+    return 'reality' in low
 
 def find_city(name):
     """Ищет город в названии"""
     name_lower = name.lower().replace('-', ' ').replace('_', ' ')
     
-    # Ищем точное совпадение
-    for city, (rus, flag) in CITY_MAP.items():
-        if city in name_lower:
+    # Ищем точное совпадение города
+    for city_key, (rus, flag) in CITY_DATA.items():
+        if city_key in name_lower:
             return rus, flag
     
-    # Ищем страну
-    for country, flag in COUNTRY_FLAGS.items():
-        if country in name_lower:
-            # Берем первое слово как город
-            words = name_lower.split()
-            for word in words:
-                if len(word) > 3 and word not in ['anycast', 'cdn', 'reality', 'vless', 'vmess', 'trojan', 'tcp', 'ws', 'grpc']:
-                    return word.capitalize(), flag
+    # Если не нашли - берем первое слово как город
+    words = [w for w in name_lower.split() if len(w) > 2]
+    if words:
+        return words[0].capitalize(), ""
     
-    return name[:15], ""
+    return name[:12], ""
 
-def get_server_type(line):
-    """Определяет тип сервера"""
-    low = line.lower()
-    if "anycast" in low:
+def get_server_icon(line):
+    if is_anycast(line):
         return "🌍"
-    elif "cdn" in low:
+    elif is_cdn(line):
         return "📡"
-    elif "reality" in low:
+    elif is_reality(line):
         return "🔒"
-    return "🌐"
+    else:
+        return "🌐"
 
-def create_simple_name(line, ping=None):
-    """
-    Создает ПРОСТОЕ название для INCY
-    Формат: 🌍 Город Флаг | 23ms
-    Максимум 30 символов
-    """
-    original = extract_original_name(line)
-    city, flag = find_city(original)
-    icon = get_server_type(line)
+def get_ping_emoji(ping):
+    if ping is None:
+        return ""
+    if ping == float('inf'):
+        return "❌"
+    if ping < 50:
+        return f"⚡{ping:.0f}ms"
+    if ping < 100:
+        return f"🚀{ping:.0f}ms"
+    if ping < 200:
+        return f"🐌{ping:.0f}ms"
+    return f"💀{ping:.0f}ms"
+
+def create_name(line, ping=None):
+    """Создает красивое короткое название"""
+    name = extract_name(line)
+    icon = get_server_icon(line)
+    ping_str = get_ping_emoji(ping)
     
-    # Базовое название: иконка + город + флаг
-    name = f"{icon} {city} {flag}"
+    # Anycast - просто Anycast
+    if is_anycast(line):
+        if ping_str:
+            return f"{icon} Anycast {ping_str}"
+        return f"{icon} Anycast"
     
-    # Добавляем пинг если есть
-    if ping is not None and ping != float('inf') and ping < 999:
-        if ping < 50:
-            name += f" ⚡{ping:.0f}ms"
-        elif ping < 100:
-            name += f" 🚀{ping:.0f}ms"
-        elif ping < 200:
-            name += f" 🐌{ping:.0f}ms"
-        else:
-            name += f" 💀{ping:.0f}ms"
-    
-    # Обрезаем до 35 символов
-    if len(name) > 35:
-        name = name[:32] + "..."
-    
-    return name.strip()
+    # Остальные - Город Флаг
+    city, flag = find_city(name)
+    if flag:
+        if ping_str:
+            return f"{icon} {city} {flag} {ping_str}"
+        return f"{icon} {city} {flag}"
+    else:
+        if ping_str:
+            return f"{icon} {city} {ping_str}"
+        return f"{icon} {city}"
 
 def process_configs(raw, is_premium=False):
-    """Обработка конфигов"""
+    """Обработка всех конфигов"""
     try:
         content = raw.decode('utf-8', errors='ignore')
         lines = content.split('\n')
@@ -189,13 +244,13 @@ def process_configs(raw, is_premium=False):
         
         for line in lines:
             line = line.strip()
-            if line.startswith(('vless://', 'trojan://', 'vmess://', 'ss://')):
+            if line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'tuic://')):
                 configs.append(line)
-                host, port = extract_server_info(line)
+                host, port = extract_host_port(line)
                 if host and port:
                     servers.append((host, port))
         
-        # Запускаем пинг в фоне
+        # Фоновый пинг
         if servers:
             ping_cache.measure_async(servers)
         
@@ -207,33 +262,36 @@ def process_configs(raw, is_premium=False):
         seen = set()
         
         for line in configs:
-            # Убираем query-параметры для сравнения дубликатов
-            base = re.sub(r'\?.*$', '', line[:line.rfind('#')] if '#' in line else line)
-            if base in seen:
-                continue
-            seen.add(base)
+            # Убираем query params для проверки дубликатов
+            clean = re.sub(r'\?.*$', '', line)
+            if '#' in clean:
+                clean = clean[:clean.rfind('#')]
             
-            host, port = extract_server_info(line)
+            if clean in seen:
+                continue
+            seen.add(clean)
+            
+            host, port = extract_host_port(line)
             ping = ping_cache.get(host, int(port)) if host and port else None
             
-            # Простое короткое название
-            name = create_simple_name(line, ping)
+            name = create_name(line, ping)
             
-            # Собираем конфиг заново (убираем старые параметры из fragment)
+            # Собираем конфиг с новым названием
             if '#' in line:
-                # Берем всё до # и добавляем новое название
-                clean = line[:line.rfind('#')]
-                # Убираем старый fragment если есть
-                clean = re.sub(r'#.*$', '', clean)
-                new_config = f"{clean}#{name}"
+                base = line[:line.rfind('#')]
             else:
-                new_config = f"{line}#{name}"
+                base = line
             
-            result.append(new_config)
+            # Убираем старый fragment
+            base = re.sub(r'#[^#]*$', '', base)
+            
+            result.append(f"{base}#{name}")
         
         return '\n'.join(result).encode('utf-8')
     except Exception as e:
         print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
         return raw
 
 # ============================================================
@@ -249,7 +307,7 @@ class PingCache:
         with self.lock:
             if key in self.cache:
                 ping, ts = self.cache[key]
-                if (datetime.now() - ts).seconds < 600:
+                if (datetime.now() - ts).seconds < PING_TTL:
                     return ping
         return None
     
@@ -301,7 +359,7 @@ def is_banned_user(uid):
         return _banned.get(uid, False)
 
 # ============================================================
-# КЭШ
+# КЭШ КОНФИГОВ
 # ============================================================
 _raw = {}
 _raw_lock = threading.Lock()
@@ -324,16 +382,17 @@ def get_raw(url):
 def bg_ping():
     while True:
         try:
-            raw = get_raw(VPN_CONFIG_URL)
-            content = raw.decode('utf-8', errors='ignore')
-            servers = []
-            for line in content.split('\n'):
-                if line.startswith(('vless://', 'trojan://', 'vmess://')):
-                    host, port = extract_server_info(line)
-                    if host and port:
-                        servers.append((host, port))
-            if servers:
-                ping_cache.measure_async(servers)
+            for url in [VPN_CONFIG_URL, OBHOD_CONFIG_URL]:
+                raw = get_raw(url)
+                content = raw.decode('utf-8', errors='ignore')
+                servers = []
+                for line in content.split('\n'):
+                    if line.startswith(('vless://', 'vmess://', 'trojan://')):
+                        host, port = extract_host_port(line)
+                        if host and port:
+                            servers.append((host, port))
+                if servers:
+                    ping_cache.measure_async(servers)
         except: pass
         time.sleep(300)
 
@@ -343,7 +402,16 @@ def keep_alive():
         try: urllib.request.urlopen(RENDER_URL + "/health", timeout=10)
         except: pass
 
+def refresh_cache():
+    while True:
+        time.sleep(CACHE_TTL)
+        try:
+            urllib.request.urlopen(VPN_CONFIG_URL, timeout=20)
+            urllib.request.urlopen(OBHOD_CONFIG_URL, timeout=20)
+        except: pass
+
 threading.Thread(target=keep_alive, daemon=True).start()
+threading.Thread(target=refresh_cache, daemon=True).start()
 threading.Thread(target=bg_ping, daemon=True).start()
 
 # ============================================================
@@ -359,7 +427,6 @@ def serve_vpn(user_id):
         title = "CBN VPN Premium" if is_prem else "CBN VPN"
         return Response(content, status=200, headers={
             "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": "public, max-age=60",
             "profile-title": title,
         })
     except:
@@ -378,7 +445,6 @@ def serve_obs(user_id):
         content = process_configs(get_raw(OBHOD_CONFIG_URL), True)
         return Response(content, status=200, headers={
             "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": "public, max-age=60",
             "profile-title": "CBN VPN Premium",
         })
     except:
@@ -390,9 +456,11 @@ def health():
 
 @app.route('/')
 def root():
-    return "CBN VPN Server v4", 200
+    return "CBN VPN Server v4.5", 200
 
+# ============================================================
 # ADMIN API
+# ============================================================
 @app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
 def api_sp(uid, status):
     if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
@@ -430,5 +498,9 @@ def api_fc():
     return 'OK', 200
 
 if __name__ == '__main__':
-    print("CBN VPN Server v4.0")
+    print("=" * 50)
+    print("CBN VPN Server v4.5")
+    print("Anycast: 🌍 Anycast ⚡ping")
+    print("Others: 📡 City 🇫🇮 🚀ping")
+    print("=" * 50)
     app.run(host='0.0.0.0', port=5000, debug=False)
