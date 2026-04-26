@@ -1,7 +1,7 @@
 """
 CBN VPN Server - STATELESS VERSION
-Теперь состояние хранится только в памяти и синхронизируется с ботом.
-При перезапуске сервер получает состояние от бота через /sync.
+Состояние в памяти, синхронизация с ботом.
+Переименование конфигов: флаги стран, перевод, 🌍 сохраняется.
 """
 
 import urllib.request
@@ -78,9 +78,10 @@ COUNTRY_DATA = {
     "UAE": {"name": "ОАЭ", "flag": "🇦🇪"},
     "United Arab Emirates": {"name": "ОАЭ", "flag": "🇦🇪"},
     "Russia": {"name": "Россия", "flag": "🇷🇺"},
+    "Anycast": {"name": "Универсальный", "flag": ""},
 }
 
-# ─── СОСТОЯНИЕ ТОЛЬКО В ПАМЯТИ ────────────────────────────
+# ─── СОСТОЯНИЕ В ПАМЯТИ ────────────────────────────────────
 _premium_users: dict[int, bool] = {}
 _banned_users: dict[int, bool] = {}
 _state_lock = threading.Lock()
@@ -110,16 +111,16 @@ def is_banned_user(user_id: int) -> bool:
     with _state_lock:
         return _banned_users.get(user_id, False)
 
-# ─── ФУНКЦИИ ПЕРЕВОДА НАЗВАНИЙ ─────────────────────────────
+# ─── ПЕРЕВОД НАЗВАНИЙ ──────────────────────────────────────
 
 def clean_config_name(name: str) -> str:
     """
     Очищает название конфигурации:
-    - 🌍 остаётся если была в оригинале
+    - 🌍 сохраняется если была в оригинале
     - Добавляет флаг страны
     - Убирает города, номера, IPv6, CIDR, технические суффиксы
     - Переводит страну на русский
-    - Anycast всегда на английском
+    - Anycast → Универсальный
     """
     
     try:
@@ -127,24 +128,29 @@ def clean_config_name(name: str) -> str:
     except:
         decoded = name
     
-    # Проверяем наличие 🌍
+    # Проверяем наличие 🌍 и временно убираем
     has_planet = '🌍' in decoded
     
+    if has_planet:
+        cleaned_text = decoded.replace('🌍', '').strip()
+    else:
+        cleaned_text = decoded
+    
     # Удаляем IPv6 адреса
-    decoded = re.sub(r'\[?[0-9a-fA-F:]{10,}\]?', '', decoded)
+    cleaned_text = re.sub(r'\[?[0-9a-fA-F:]{10,}\]?', '', cleaned_text)
     
     # Удаляем CIDR маски
-    decoded = re.sub(r'/\d{1,3}', '', decoded)
+    cleaned_text = re.sub(r'/\d{1,3}', '', cleaned_text)
     
     # Удаляем номера серверов
-    decoded = re.sub(r'[-_#]\d{1,3}$', '', decoded)
-    decoded = re.sub(r'\s*\(\d+\)', '', decoded)
-    decoded = re.sub(r'\s*\[\d+\]', '', decoded)
+    cleaned_text = re.sub(r'[-_#]\d{1,3}$', '', cleaned_text)
+    cleaned_text = re.sub(r'\s*\(\d+\)', '', cleaned_text)
+    cleaned_text = re.sub(r'\s*\[\d+\]', '', cleaned_text)
     
-    # Убираем города (всё после дефиса, если это не часть названия страны)
-    parts = decoded.split('-')
+    # Убираем города (всё после дефиса)
+    parts = cleaned_text.split('-')
     if len(parts) > 1:
-        decoded = parts[0].strip()
+        cleaned_text = parts[0].strip()
     
     # Удаляем технические суффиксы
     tech_suffixes = [
@@ -170,22 +176,22 @@ def clean_config_name(name: str) -> str:
     ]
     
     for suffix in tech_suffixes:
-        decoded = re.sub(rf'\b{suffix}\b', '', decoded, flags=re.IGNORECASE)
-        decoded = re.sub(rf'-{suffix}$', '', decoded, flags=re.IGNORECASE)
-        decoded = re.sub(rf'_{suffix}$', '', decoded, flags=re.IGNORECASE)
+        cleaned_text = re.sub(rf'\b{suffix}\b', '', cleaned_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(rf'-{suffix}$', '', cleaned_text, flags=re.IGNORECASE)
+        cleaned_text = re.sub(rf'_{suffix}$', '', cleaned_text, flags=re.IGNORECASE)
     
     # Чистим пробелы и дефисы
-    decoded = re.sub(r'\s+', ' ', decoded)
-    decoded = re.sub(r'-+', '-', decoded)
-    decoded = decoded.strip().strip('-').strip()
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
+    cleaned_text = re.sub(r'-+', '-', cleaned_text)
+    cleaned_text = cleaned_text.strip().strip('-').strip()
     
-    # Anycast всегда на английском
-    if 'anycast' in decoded.lower():
-        return f"🌍 Anycast" if has_planet else "Anycast"
+    # Anycast → Универсальный
+    if 'anycast' in cleaned_text.lower():
+        return f"🌍 Универсальный" if has_planet else "Универсальный"
     
     # Ищем страну и добавляем флаг + перевод
     for eng, data in COUNTRY_DATA.items():
-        if eng.lower() == decoded.lower() or eng.lower() in decoded.lower():
+        if eng.lower() == cleaned_text.lower() or eng.lower() in cleaned_text.lower():
             flag = data["flag"]
             ru_name = data["name"]
             if has_planet:
@@ -193,17 +199,15 @@ def clean_config_name(name: str) -> str:
             else:
                 return f"{flag} {ru_name}"
     
-    # Если не нашли страну
+    # Если не нашли страну — возвращаем очищенное
     if has_planet:
-        return f"🌍 {decoded}"
-    return decoded
+        return f"🌍 {cleaned_text}" if cleaned_text else f"🌍 {decoded}"
+    
+    return cleaned_text if cleaned_text else decoded
 
 
 def process_config_line(line: str) -> str:
-    """
-    Обрабатывает одну строку конфигурации любого протокола
-    Поддерживает: VLESS, VMess, Trojan, Shadowsocks, Hysteria, TUIC и др.
-    """
+    """Обрабатывает строку конфигурации любого протокола"""
     
     # VLESS, Trojan, Hysteria, TUIC с #name в конце
     if '#' in line and not line.startswith('vmess://'):
@@ -242,7 +246,7 @@ def process_config_line(line: str) -> str:
             print(f"[translate] Ошибка обработки VMess: {e}")
             return line
     
-    # Hysteria2, TUIC, Sing-box и другие
+    # Hysteria2, TUIC и другие
     if any(line.startswith(proto) for proto in ['hysteria2://', 'tuic://', 'vless://', 'trojan://']):
         if '#' in line:
             base_url, sep, name = line.rpartition('#')
@@ -255,7 +259,7 @@ def process_config_line(line: str) -> str:
 
 
 def translate_config_text(config_text: str) -> str:
-    """Обрабатывает весь конфиг, переименовывает все серверы"""
+    """Обрабатывает весь конфиг"""
     if not config_text:
         return config_text
     
@@ -277,7 +281,7 @@ def translate_config_text(config_text: str) -> str:
     
     return '\n'.join(result_lines)
 
-# ─── КЕШ КОНФИГОВ ─────────────────────────────────────────
+# ─── КЭШ КОНФИГОВ ─────────────────────────────────────────
 _cache = {
     "vpn":  {"data": None, "translated": None, "updated_at": 0, "updating": False},
     "obs":  {"data": None, "translated": None, "updated_at": 0, "updating": False},
@@ -300,7 +304,6 @@ def _download(url: str, timeout: int = 30, retries: int = 3) -> bytes:
 def _warm_one(key: str, url: str):
     try:
         data = _download(url)
-        # Переводим названия в конфиге
         translated = translate_config_text(data.decode('utf-8')).encode('utf-8')
         
         with _cache_lock:
@@ -330,7 +333,6 @@ def get_config(key: str, url: str) -> bytes:
         threading.Thread(target=_warm_one, args=(key, url), daemon=True).start()
         return entry["translated"]
 
-    # Синхронная загрузка если кэш пуст
     try:
         data = _download(url)
         translated = translate_config_text(data.decode('utf-8')).encode('utf-8')
@@ -389,7 +391,6 @@ def serve_obs(user_id):
     if not is_premium_user(user_id):
         return redirect(VPN_CONFIG_URL, code=302)
     try:
-        # ✅ ИСПРАВЛЕНО: используем get_config вместо _download
         content = get_config("obs", OBHOD_CONFIG_URL)
         return Response(
             content, 
@@ -488,7 +489,6 @@ def flush_cache():
 
 @app.route('/check_batch', methods=['POST'])
 def api_check_batch():
-    """Проверка статуса для нескольких пользователей"""
     secret = request.headers.get('X-Secret', '')
     if secret != SECRET_KEY:
         return 'Forbidden', 403
