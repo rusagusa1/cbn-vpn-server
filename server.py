@@ -116,7 +116,8 @@ def is_banned_user(user_id: int) -> bool:
 def clean_config_name(name: str) -> str:
     """
     Очищает название конфигурации:
-    - 🌍 сохраняется если была в оригинале
+    - 🌍 для России → (все сервисы)
+    - 🌍 для Anycast → игнорируем
     - Добавляет флаг страны
     - Убирает города, номера, IPv6, CIDR, технические суффиксы
     - Переводит страну на русский
@@ -128,7 +129,7 @@ def clean_config_name(name: str) -> str:
     except:
         decoded = name
     
-    # Проверяем наличие 🌍 и временно убираем
+    # Проверяем наличие 🌍
     has_planet = '🌍' in decoded
     
     if has_planet:
@@ -185,24 +186,23 @@ def clean_config_name(name: str) -> str:
     cleaned_text = re.sub(r'-+', '-', cleaned_text)
     cleaned_text = cleaned_text.strip().strip('-').strip()
     
-    # Anycast → Универсальный
+    # Anycast → Универсальный (без всяких приписок)
     if 'anycast' in cleaned_text.lower():
-        return f"🌍 Универсальный" if has_planet else "Универсальный"
+        return "Универсальный"
     
     # Ищем страну и добавляем флаг + перевод
     for eng, data in COUNTRY_DATA.items():
         if eng.lower() == cleaned_text.lower() or eng.lower() in cleaned_text.lower():
             flag = data["flag"]
             ru_name = data["name"]
-            if has_planet:
-                return f"🌍 {flag} {ru_name}"
+            
+            # ✅ Для России с 🌍 добавляем "(все сервисы)"
+            if has_planet and eng.lower() == "russia":
+                return f"{flag} {ru_name} (все сервисы)"
             else:
                 return f"{flag} {ru_name}"
     
     # Если не нашли страну — возвращаем очищенное
-    if has_planet:
-        return f"🌍 {cleaned_text}" if cleaned_text else f"🌍 {decoded}"
-    
     return cleaned_text if cleaned_text else decoded
 
 
