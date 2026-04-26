@@ -21,64 +21,63 @@ RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
 
-# ─── СЛОВАРЬ ПЕРЕВОДА СТРАН ─────────────────────────────────
-COUNTRY_TRANSLATIONS = {
-    "Netherlands": "Нидерланды",
-    "Germany": "Германия",
-    "France": "Франция",
-    "UK": "Англия",
-    "United Kingdom": "Англия",
-    "Sweden": "Швеция",
-    "Switzerland": "Швейцария",
-    "Finland": "Финляндия",
-    "Norway": "Норвегия",
-    "Poland": "Польша",
-    "Italy": "Италия",
-    "Spain": "Испания",
-    "Austria": "Австрия",
-    "Belgium": "Бельгия",
-    "Czech": "Чехия",
-    "Denmark": "Дания",
-    "Ireland": "Ирландия",
-    "Latvia": "Латвия",
-    "Lithuania": "Литва",
-    "Luxembourg": "Люксембург",
-    "Romania": "Румыния",
-    "Serbia": "Сербия",
-    "Slovakia": "Словакия",
-    "Slovenia": "Словения",
-    "Bulgaria": "Болгария",
-    "Hungary": "Венгрия",
-    "Greece": "Греция",
-    "Portugal": "Португалия",
-    "Moldova": "Молдова",
-    "Estonia": "Эстония",
-    "Iceland": "Исландия",
-    "Singapore": "Сингапур",
-    "Japan": "Япония",
-    "Hong Kong": "Гонконг",
-    "South Korea": "Корея",
-    "Taiwan": "Тайвань",
-    "Vietnam": "Вьетнам",
-    "Thailand": "Таиланд",
-    "India": "Индия",
-    "Indonesia": "Индонезия",
-    "Malaysia": "Малайзия",
-    "Philippines": "Филиппины",
-    "China": "Китай",
-    "Turkey": "Турция",
-    "Israel": "Израиль",
-    "Kazakhstan": "Казахстан",
-    "USA": "США",
-    "United States": "США",
-    "Canada": "Канада",
-    "Brazil": "Бразилия",
-    "Mexico": "Мексика",
-    "Argentina": "Аргентина",
-    "UAE": "ОАЭ",
-    "United Arab Emirates": "ОАЭ",
-    "Russia": "Россия",
-    "Moscow": "Москва",
+# ─── СЛОВАРЬ СТРАН С ФЛАГАМИ ────────────────────────────────
+COUNTRY_DATA = {
+    "Netherlands": {"name": "Нидерланды", "flag": "🇳🇱"},
+    "Germany": {"name": "Германия", "flag": "🇩🇪"},
+    "France": {"name": "Франция", "flag": "🇫🇷"},
+    "UK": {"name": "Англия", "flag": "🇬🇧"},
+    "United Kingdom": {"name": "Англия", "flag": "🇬🇧"},
+    "Sweden": {"name": "Швеция", "flag": "🇸🇪"},
+    "Switzerland": {"name": "Швейцария", "flag": "🇨🇭"},
+    "Finland": {"name": "Финляндия", "flag": "🇫🇮"},
+    "Norway": {"name": "Норвегия", "flag": "🇳🇴"},
+    "Poland": {"name": "Польша", "flag": "🇵🇱"},
+    "Italy": {"name": "Италия", "flag": "🇮🇹"},
+    "Spain": {"name": "Испания", "flag": "🇪🇸"},
+    "Austria": {"name": "Австрия", "flag": "🇦🇹"},
+    "Belgium": {"name": "Бельгия", "flag": "🇧🇪"},
+    "Czech": {"name": "Чехия", "flag": "🇨🇿"},
+    "Denmark": {"name": "Дания", "flag": "🇩🇰"},
+    "Ireland": {"name": "Ирландия", "flag": "🇮🇪"},
+    "Latvia": {"name": "Латвия", "flag": "🇱🇻"},
+    "Lithuania": {"name": "Литва", "flag": "🇱🇹"},
+    "Luxembourg": {"name": "Люксембург", "flag": "🇱🇺"},
+    "Romania": {"name": "Румыния", "flag": "🇷🇴"},
+    "Serbia": {"name": "Сербия", "flag": "🇷🇸"},
+    "Slovakia": {"name": "Словакия", "flag": "🇸🇰"},
+    "Slovenia": {"name": "Словения", "flag": "🇸🇮"},
+    "Bulgaria": {"name": "Болгария", "flag": "🇧🇬"},
+    "Hungary": {"name": "Венгрия", "flag": "🇭🇺"},
+    "Greece": {"name": "Греция", "flag": "🇬🇷"},
+    "Portugal": {"name": "Португалия", "flag": "🇵🇹"},
+    "Moldova": {"name": "Молдова", "flag": "🇲🇩"},
+    "Estonia": {"name": "Эстония", "flag": "🇪🇪"},
+    "Iceland": {"name": "Исландия", "flag": "🇮🇸"},
+    "Singapore": {"name": "Сингапур", "flag": "🇸🇬"},
+    "Japan": {"name": "Япония", "flag": "🇯🇵"},
+    "Hong Kong": {"name": "Гонконг", "flag": "🇭🇰"},
+    "South Korea": {"name": "Корея", "flag": "🇰🇷"},
+    "Taiwan": {"name": "Тайвань", "flag": "🇹🇼"},
+    "Vietnam": {"name": "Вьетнам", "flag": "🇻🇳"},
+    "Thailand": {"name": "Таиланд", "flag": "🇹🇭"},
+    "India": {"name": "Индия", "flag": "🇮🇳"},
+    "Indonesia": {"name": "Индонезия", "flag": "🇮🇩"},
+    "Malaysia": {"name": "Малайзия", "flag": "🇲🇾"},
+    "Philippines": {"name": "Филиппины", "flag": "🇵🇭"},
+    "China": {"name": "Китай", "flag": "🇨🇳"},
+    "Turkey": {"name": "Турция", "flag": "🇹🇷"},
+    "Israel": {"name": "Израиль", "flag": "🇮🇱"},
+    "Kazakhstan": {"name": "Казахстан", "flag": "🇰🇿"},
+    "USA": {"name": "США", "flag": "🇺🇸"},
+    "United States": {"name": "США", "flag": "🇺🇸"},
+    "Canada": {"name": "Канада", "flag": "🇨🇦"},
+    "Brazil": {"name": "Бразилия", "flag": "🇧🇷"},
+    "Mexico": {"name": "Мексика", "flag": "🇲🇽"},
+    "Argentina": {"name": "Аргентина", "flag": "🇦🇷"},
+    "UAE": {"name": "ОАЭ", "flag": "🇦🇪"},
+    "United Arab Emirates": {"name": "ОАЭ", "flag": "🇦🇪"},
+    "Russia": {"name": "Россия", "flag": "🇷🇺"},
 }
 
 # ─── СОСТОЯНИЕ ТОЛЬКО В ПАМЯТИ ────────────────────────────
@@ -117,6 +116,7 @@ def clean_config_name(name: str) -> str:
     """
     Очищает название конфигурации:
     - 🌍 остаётся если была в оригинале
+    - Добавляет флаг страны
     - Убирает города, номера, IPv6, CIDR, технические суффиксы
     - Переводит страну на русский
     - Anycast всегда на английском
@@ -183,13 +183,20 @@ def clean_config_name(name: str) -> str:
     if 'anycast' in decoded.lower():
         return f"🌍 Anycast" if has_planet else "Anycast"
     
-    # Переводим страну
-    for eng, ru in COUNTRY_TRANSLATIONS.items():
+    # Ищем страну и добавляем флаг + перевод
+    for eng, data in COUNTRY_DATA.items():
         if eng.lower() == decoded.lower() or eng.lower() in decoded.lower():
-            return f"🌍 {ru}" if has_planet else ru
+            flag = data["flag"]
+            ru_name = data["name"]
+            if has_planet:
+                return f"🌍 {flag} {ru_name}"
+            else:
+                return f"{flag} {ru_name}"
     
     # Если не нашли страну
-    return f"🌍 {decoded}" if has_planet else decoded
+    if has_planet:
+        return f"🌍 {decoded}"
+    return decoded
 
 
 def process_config_line(line: str) -> str:
@@ -382,6 +389,7 @@ def serve_obs(user_id):
     if not is_premium_user(user_id):
         return redirect(VPN_CONFIG_URL, code=302)
     try:
+        # ✅ ИСПРАВЛЕНО: используем get_config вместо _download
         content = get_config("obs", OBHOD_CONFIG_URL)
         return Response(
             content, 
