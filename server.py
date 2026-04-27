@@ -1,7 +1,6 @@
 """
-CBN VPN Server - v5.1
-Названия: Город + Флаг + Транспорт + Нумерация
-Anycast: 🌍 Anycast · Транспорт
+CBN VPN Server - v5.3
+Фикс: правильные названия подписок, конфиги не ломаются
 """
 
 import urllib.request
@@ -21,107 +20,82 @@ RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
 
-# ============================================================
-# СЛОВАРЬ ГОРОДОВ
-# ============================================================
 CITY_DATA = {
-    "amsterdam": ("Амстердам", "🇳🇱"),
-    "frankfurt": ("Франкфурт", "🇩🇪"),
-    "helsinki": ("Хельсинки", "🇫🇮"),
-    "stockholm": ("Стокгольм", "🇸🇪"),
-    "oslo": ("Осло", "🇳🇴"),
-    "zurich": ("Цюрих", "🇨🇭"),
-    "paris": ("Париж", "🇫🇷"),
-    "london": ("Лондон", "🇬🇧"),
-    "moscow": ("Москва", "🇷🇺"),
-    "st petersburg": ("СПб", "🇷🇺"),
-    "saint petersburg": ("СПб", "🇷🇺"),
-    "kiev": ("Киев", "🇺🇦"),
-    "warsaw": ("Варшава", "🇵🇱"),
-    "madrid": ("Мадрид", "🇪🇸"),
-    "barcelona": ("Барселона", "🇪🇸"),
-    "rome": ("Рим", "🇮🇹"),
-    "milan": ("Милан", "🇮🇹"),
-    "vienna": ("Вена", "🇦🇹"),
-    "prague": ("Прага", "🇨🇿"),
-    "berlin": ("Берлин", "🇩🇪"),
-    "munich": ("Мюнхен", "🇩🇪"),
-    "hamburg": ("Гамбург", "🇩🇪"),
-    "lisbon": ("Лиссабон", "🇵🇹"),
-    "dublin": ("Дублин", "🇮🇪"),
-    "copenhagen": ("Копенгаген", "🇩🇰"),
-    "brussels": ("Брюссель", "🇧🇪"),
-    "budapest": ("Будапешт", "🇭🇺"),
-    "bucharest": ("Бухарест", "🇷🇴"),
-    "sofia": ("София", "🇧🇬"),
-    "athens": ("Афины", "🇬🇷"),
-    "riga": ("Рига", "🇱🇻"),
-    "tallinn": ("Таллин", "🇪🇪"),
-    "vilnius": ("Вильнюс", "🇱🇹"),
-    "belgrade": ("Белград", "🇷🇸"),
-    "bratislava": ("Братислава", "🇸🇰"),
-    "ljubljana": ("Любляна", "🇸🇮"),
-    "zagreb": ("Загреб", "🇭🇷"),
-    "istanbul": ("Стамбул", "🇹🇷"),
-    "dubai": ("Дубай", "🇦🇪"),
-    "tokyo": ("Токио", "🇯🇵"),
-    "osaka": ("Осака", "🇯🇵"),
-    "seoul": ("Сеул", "🇰🇷"),
-    "busan": ("Пусан", "🇰🇷"),
-    "sydney": ("Сидней", "🇦🇺"),
-    "melbourne": ("Мельбурн", "🇦🇺"),
-    "toronto": ("Торонто", "🇨🇦"),
-    "vancouver": ("Ванкувер", "🇨🇦"),
-    "new york": ("Нью-Йорк", "🇺🇸"),
-    "los angeles": ("Лос-Анджелес", "🇺🇸"),
-    "chicago": ("Чикаго", "🇺🇸"),
-    "dallas": ("Даллас", "🇺🇸"),
-    "miami": ("Майами", "🇺🇸"),
-    "seattle": ("Сиэтл", "🇺🇸"),
-    "san francisco": ("Сан-Франциско", "🇺🇸"),
-    "sao paulo": ("Сан-Паулу", "🇧🇷"),
-    "rio de janeiro": ("Рио", "🇧🇷"),
-    "mexico city": ("Мехико", "🇲🇽"),
-    "buenos aires": ("Буэнос-Айрес", "🇦🇷"),
-    "santiago": ("Сантьяго", "🇨🇱"),
-    "lima": ("Лима", "🇵🇪"),
-    "bogota": ("Богота", "🇨🇴"),
-    "singapore": ("Сингапур", "🇸🇬"),
-    "hong kong": ("Гонконг", "🇭🇰"),
-    "taipei": ("Тайбэй", "🇹🇼"),
-    "mumbai": ("Мумбаи", "🇮🇳"),
-    "delhi": ("Дели", "🇮🇳"),
-    "bangalore": ("Бангалор", "🇮🇳"),
-    "tel aviv": ("Тель-Авив", "🇮🇱"),
-    "jakarta": ("Джакарта", "🇮🇩"),
-    "bangkok": ("Бангкок", "🇹🇭"),
-    "kuala lumpur": ("Куала-Лумпур", "🇲🇾"),
-    "manila": ("Манила", "🇵🇭"),
-    "ho chi minh": ("Хошимин", "🇻🇳"),
-    "hanoi": ("Ханой", "🇻🇳"),
+    "germany": ("Германия", "🇩🇪"), "netherlands": ("Нидерланды", "🇳🇱"),
+    "finland": ("Финляндия", "🇫🇮"), "sweden": ("Швеция", "🇸🇪"),
+    "norway": ("Норвегия", "🇳🇴"), "switzerland": ("Швейцария", "🇨🇭"),
+    "france": ("Франция", "🇫🇷"), "uk": ("Великобритания", "🇬🇧"),
+    "united kingdom": ("Великобритания", "🇬🇧"), "usa": ("США", "🇺🇸"),
+    "united states": ("США", "🇺🇸"), "canada": ("Канада", "🇨🇦"),
+    "japan": ("Япония", "🇯🇵"), "singapore": ("Сингапур", "🇸🇬"),
+    "hong kong": ("Гонконг", "🇭🇰"), "italy": ("Италия", "🇮🇹"),
+    "spain": ("Испания", "🇪🇸"), "poland": ("Польша", "🇵🇱"),
+    "latvia": ("Латвия", "🇱🇻"), "lithuania": ("Литва", "🇱🇹"),
+    "estonia": ("Эстония", "🇪🇪"), "russia": ("Россия", "🇷🇺"),
+    "ukraine": ("Украина", "🇺🇦"), "turkey": ("Турция", "🇹🇷"),
+    "india": ("Индия", "🇮🇳"), "brazil": ("Бразилия", "🇧🇷"),
+    "australia": ("Австралия", "🇦🇺"), "austria": ("Австрия", "🇦🇹"),
+    "belgium": ("Бельгия", "🇧🇪"), "czech": ("Чехия", "🇨🇿"),
+    "denmark": ("Дания", "🇩🇰"), "ireland": ("Ирландия", "🇮🇪"),
+    "portugal": ("Португалия", "🇵🇹"), "romania": ("Румыния", "🇷🇴"),
+    "slovakia": ("Словакия", "🇸🇰"), "bulgaria": ("Болгария", "🇧🇬"),
+    "croatia": ("Хорватия", "🇭🇷"), "greece": ("Греция", "🇬🇷"),
+    "hungary": ("Венгрия", "🇭🇺"), "iceland": ("Исландия", "🇮🇸"),
+    "luxembourg": ("Люксембург", "🇱🇺"), "serbia": ("Сербия", "🇷🇸"),
+    "south korea": ("Корея", "🇰🇷"), "taiwan": ("Тайвань", "🇹🇼"),
+    "vietnam": ("Вьетнам", "🇻🇳"), "thailand": ("Таиланд", "🇹🇭"),
+    "malaysia": ("Малайзия", "🇲🇾"), "indonesia": ("Индонезия", "🇮🇩"),
+    "mexico": ("Мексика", "🇲🇽"), "argentina": ("Аргентина", "🇦🇷"),
+    "chile": ("Чили", "🇨🇱"), "south africa": ("ЮАР", "🇿🇦"),
+    "israel": ("Израиль", "🇮🇱"), "uae": ("ОАЭ", "🇦🇪"),
+    "kazakhstan": ("Казахстан", "🇰🇿"), "belarus": ("Беларусь", "🇧🇾"),
+    "moldova": ("Молдова", "🇲🇩"), "georgia": ("Грузия", "🇬🇪"),
+    "cyprus": ("Кипр", "🇨🇾"), "malta": ("Мальта", "🇲🇹"),
+    "slovenia": ("Словения", "🇸🇮"),
+    # Города
+    "amsterdam": ("Амстердам", "🇳🇱"), "frankfurt": ("Франкфурт", "🇩🇪"),
+    "helsinki": ("Хельсинки", "🇫🇮"), "stockholm": ("Стокгольм", "🇸🇪"),
+    "oslo": ("Осло", "🇳🇴"), "zurich": ("Цюрих", "🇨🇭"),
+    "paris": ("Париж", "🇫🇷"), "london": ("Лондон", "🇬🇧"),
+    "moscow": ("Москва", "🇷🇺"), "st petersburg": ("СПб", "🇷🇺"),
+    "warsaw": ("Варшава", "🇵🇱"), "madrid": ("Мадрид", "🇪🇸"),
+    "barcelona": ("Барселона", "🇪🇸"), "rome": ("Рим", "🇮🇹"),
+    "milan": ("Милан", "🇮🇹"), "vienna": ("Вена", "🇦🇹"),
+    "prague": ("Прага", "🇨🇿"), "berlin": ("Берлин", "🇩🇪"),
+    "munich": ("Мюнхен", "🇩🇪"), "hamburg": ("Гамбург", "🇩🇪"),
+    "lisbon": ("Лиссабон", "🇵🇹"), "dublin": ("Дублин", "🇮🇪"),
+    "copenhagen": ("Копенгаген", "🇩🇰"), "brussels": ("Брюссель", "🇧🇪"),
+    "budapest": ("Будапешт", "🇭🇺"), "bucharest": ("Бухарест", "🇷🇴"),
+    "sofia": ("София", "🇧🇬"), "athens": ("Афины", "🇬🇷"),
+    "riga": ("Рига", "🇱🇻"), "tallinn": ("Таллин", "🇪🇪"),
+    "vilnius": ("Вильнюс", "🇱🇹"), "belgrade": ("Белград", "🇷🇸"),
+    "istanbul": ("Стамбул", "🇹🇷"), "dubai": ("Дубай", "🇦🇪"),
+    "tokyo": ("Токио", "🇯🇵"), "seoul": ("Сеул", "🇰🇷"),
+    "sydney": ("Сидней", "🇦🇺"), "toronto": ("Торонто", "🇨🇦"),
+    "new york": ("Нью-Йорк", "🇺🇸"), "los angeles": ("Лос-Анджелес", "🇺🇸"),
+    "chicago": ("Чикаго", "🇺🇸"), "dallas": ("Даллас", "🇺🇸"),
+    "miami": ("Майами", "🇺🇸"), "seattle": ("Сиэтл", "🇺🇸"),
+    "sao paulo": ("Сан-Паулу", "🇧🇷"), "mexico city": ("Мехико", "🇲🇽"),
+    "buenos aires": ("Буэнос-Айрес", "🇦🇷"), "santiago": ("Сантьяго", "🇨🇱"),
+    "taipei": ("Тайбэй", "🇹🇼"), "mumbai": ("Мумбаи", "🇮🇳"),
+    "delhi": ("Дели", "🇮🇳"), "tel aviv": ("Тель-Авив", "🇮🇱"),
+    "jakarta": ("Джакарта", "🇮🇩"), "bangkok": ("Бангкок", "🇹🇭"),
+    "kuala lumpur": ("Куала-Лумпур", "🇲🇾"), "manila": ("Манила", "🇵🇭"),
 }
 
-def extract_host_port(line):
-    m = re.search(r'@([\d.]+):(\d+)', line)
-    if m:
-        return m.group(1), m.group(2)
-    if line.startswith('vmess://'):
-        try:
-            b64 = line[8:]
-            padding = 4 - len(b64) % 4
-            if padding != 4:
-                b64 += '=' * padding
-            decoded = base64.b64decode(b64).decode('utf-8')
-            data = json.loads(decoded)
-            return data.get('add'), str(data.get('port', '443'))
-        except:
-            pass
-    return None, None
+def clean_name(name):
+    """Очищает название от мусора"""
+    name = re.sub(r'\[.*?\]', '', name)  # Убираем [ipv6], [*cidr] и т.д.
+    name = re.sub(r'\b[a-z]{2}\b', '', name, flags=re.IGNORECASE)  # Убираем vk, ya
+    name = re.sub(r'\s+', ' ', name).strip()  # Чистим пробелы
+    name = name.strip('|').strip()  # Убираем палки
+    return name
 
 def extract_name(line):
+    """Извлекает и очищает название конфига"""
     m = re.search(r'#([^#\n]+)$', line)
     if m:
-        return m.group(1).strip()
+        return clean_name(m.group(1))
     if line.startswith('vmess://'):
         try:
             b64 = line[8:]
@@ -130,22 +104,17 @@ def extract_name(line):
                 b64 += '=' * padding
             decoded = base64.b64decode(b64).decode('utf-8')
             data = json.loads(decoded)
-            return data.get('ps', '')
+            return clean_name(data.get('ps', ''))
         except:
             pass
     return ""
 
 def get_transport(line):
-    """Определяет транспорт: WS, TCP, GRPC, Reality"""
     low = line.lower()
-    if 'grpc' in low:
-        return 'GRPC'
-    elif 'ws' in low:
-        return 'WS'
-    elif 'reality' in low:
-        return 'Reality'
-    elif 'tcp' in low:
-        return 'TCP'
+    if 'grpc' in low: return 'GRPC'
+    if 'ws' in low: return 'WS'
+    if 'reality' in low: return 'Reality'
+    if 'tcp' in low: return 'TCP'
     return ''
 
 def is_anycast(line):
@@ -155,26 +124,23 @@ def is_anycast(line):
 
 def is_cdn(line):
     low = line.lower()
-    name = extract_name(line).lower()
-    return 'cdn' in low or 'cdn' in name
+    return 'cdn' in low
 
 def is_reality(line):
     return 'reality' in line.lower()
 
 def get_icon(line):
-    if is_anycast(line):
-        return "🌍"
-    elif is_cdn(line):
-        return "📡"
-    elif is_reality(line):
-        return "🔒"
+    if is_anycast(line): return "🌍"
+    if is_cdn(line): return "📡"
+    if is_reality(line): return "🔒"
     return "🌐"
 
-def find_city(name):
-    name_lower = name.lower().replace('-', ' ').replace('_', ' ')
-    for city_key, (rus, flag) in CITY_DATA.items():
-        if city_key in name_lower:
-            return rus, flag
+def find_location(name):
+    name_lower = name.lower()
+    # Ищем самый длинный ключ (город приоритетнее страны)
+    for key in sorted(CITY_DATA.keys(), key=len, reverse=True):
+        if key in name_lower:
+            return CITY_DATA[key]
     words = [w for w in name_lower.split() if len(w) > 2]
     if words:
         return words[0].capitalize(), ""
@@ -186,21 +152,14 @@ def create_name(line):
     transport = get_transport(line)
 
     if is_anycast(line):
-        if transport:
-            return f"{icon} Anycast · {transport}"
-        return f"{icon} Anycast"
+        return f"{icon} Anycast · {transport}" if transport else f"{icon} Anycast"
 
-    city, flag = find_city(name)
-    if flag:
-        base = f"{icon} {city} {flag}"
-    else:
-        base = f"{icon} {city}"
-
-    if transport:
-        return f"{base} · {transport}"
-    return base
+    location, flag = find_location(name)
+    base = f"{icon} {location} {flag}" if flag else f"{icon} {location}"
+    return f"{base} · {transport}" if transport else base
 
 def process_configs(raw, is_premium=False):
+    """Обработка конфигов БЕЗ изменения структуры URL"""
     try:
         content = raw.decode('utf-8', errors='ignore')
         lines = content.split('\n')
@@ -208,46 +167,56 @@ def process_configs(raw, is_premium=False):
         configs = []
         for line in lines:
             line = line.strip()
-            if line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'tuic://')):
+            if line and (line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'tuic://'))):
                 configs.append(line)
 
         result = []
-        result.append("#profile-title: CBN VPN Premium" if is_premium else "#profile-title: CBN VPN")
+        # Правильный заголовок
+        if is_premium:
+            result.append("#profile-title: CBN VPN Premium")
+        else:
+            result.append("#profile-title: CBN VPN")
         result.append("#profile-update-interval: 6")
         result.append("")
 
-        # Считаем повторения для нумерации
+        # Собираем названия
         name_counts = {}
-        final_names = []
+        config_data = []
 
         for line in configs:
-            clean = re.sub(r'\?.*$', '', line)
-            if '#' in clean:
-                clean = clean[:clean.rfind('#')]
-            if clean not in [x[0] for x in final_names]:
+            # Сохраняем всё ДО # для проверки дубликатов
+            if '#' in line:
+                base_for_dedup = line[:line.rfind('#')]
+            else:
+                base_for_dedup = line
+            
+            if base_for_dedup not in [x[0] for x in config_data]:
                 name = create_name(line)
-                final_names.append((clean, name))
+                config_data.append((base_for_dedup, name, line))
                 name_counts[name] = name_counts.get(name, 0) + 1
 
-        # Второй проход: добавляем нумерацию если есть повторы
+        # Выводим с нумерацией
         name_index = {}
-        for clean, name in final_names:
+        for base, name, line in config_data:
             if name_counts[name] > 1:
                 name_index[name] = name_index.get(name, 0) + 1
                 display_name = f"{name} #{name_index[name]}"
             else:
                 display_name = name
 
+            # Безопасная замена названия
             if '#' in line:
-                base = line[:line.rfind('#')]
+                # Сохраняем всё до последнего #
+                base_url = line[:line.rfind('#')]
+                result.append(f"{base_url}#{display_name}")
             else:
-                base = line
-            base = re.sub(r'#[^#]*$', '', base)
-            result.append(f"{base}#{display_name}")
+                result.append(f"{line}#{display_name}")
 
         return '\n'.join(result).encode('utf-8')
     except Exception as e:
         print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
         return raw
 
 # ============================================================
@@ -353,11 +322,9 @@ def health():
 
 @app.route('/')
 def root():
-    return "CBN VPN Server v5.1", 200
+    return "CBN VPN Server v5.3", 200
 
-# ============================================================
 # ADMIN API
-# ============================================================
 @app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
 def api_sp(uid, status):
     if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
@@ -395,6 +362,6 @@ def api_fc():
     return 'OK', 200
 
 if __name__ == '__main__':
-    print("CBN VPN Server v5.1")
-    print("Format: City + Flag + Transport + Numbering")
+    print("CBN VPN Server v5.3")
+    print("Fixed: names, config structure preserved")
     app.run(host='0.0.0.0', port=5000, debug=False)
