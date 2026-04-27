@@ -1,7 +1,6 @@
 """
-CBN VPN Server - v5.5
-Фикс: Обычная НЕ Premium, чистка f0, перевод стран
-Формат: Город/Страна Флаг · Транспорт
+CBN VPN Server - v5.6
+Фикс: URL-decode названий, обычная подписка ≠ Premium
 """
 
 import urllib.request
@@ -11,6 +10,7 @@ import re
 import base64
 import json
 from datetime import datetime
+from urllib.parse import unquote
 from flask import Flask, request, Response, redirect
 
 app = Flask(__name__)
@@ -22,7 +22,6 @@ SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
 
 CITY_DATA = {
-    # Страны
     "united states": ("США", "🇺🇸"), "usa": ("США", "🇺🇸"),
     "germany": ("Германия", "🇩🇪"), "netherlands": ("Нидерланды", "🇳🇱"),
     "finland": ("Финляндия", "🇫🇮"), "sweden": ("Швеция", "🇸🇪"),
@@ -46,13 +45,10 @@ CITY_DATA = {
     "south korea": ("Корея", "🇰🇷"), "taiwan": ("Тайвань", "🇹🇼"),
     "vietnam": ("Вьетнам", "🇻🇳"), "thailand": ("Таиланд", "🇹🇭"),
     "malaysia": ("Малайзия", "🇲🇾"), "indonesia": ("Индонезия", "🇮🇩"),
-    "philippines": ("Филиппины", "🇵🇭"), "mexico": ("Мексика", "🇲🇽"),
-    "argentina": ("Аргентина", "🇦🇷"), "chile": ("Чили", "🇨🇱"),
-    "south africa": ("ЮАР", "🇿🇦"), "israel": ("Израиль", "🇮🇱"),
-    "uae": ("ОАЭ", "🇦🇪"), "kazakhstan": ("Казахстан", "🇰🇿"),
-    "belarus": ("Беларусь", "🇧🇾"), "moldova": ("Молдова", "🇲🇩"),
-    "georgia": ("Грузия", "🇬🇪"), "cyprus": ("Кипр", "🇨🇾"),
-    # Города
+    "mexico": ("Мексика", "🇲🇽"), "argentina": ("Аргентина", "🇦🇷"),
+    "chile": ("Чили", "🇨🇱"), "south africa": ("ЮАР", "🇿🇦"),
+    "israel": ("Израиль", "🇮🇱"), "uae": ("ОАЭ", "🇦🇪"),
+    "kazakhstan": ("Казахстан", "🇰🇿"), "belarus": ("Беларусь", "🇧🇾"),
     "amsterdam": ("Амстердам", "🇳🇱"), "frankfurt": ("Франкфурт", "🇩🇪"),
     "helsinki": ("Хельсинки", "🇫🇮"), "stockholm": ("Стокгольм", "🇸🇪"),
     "oslo": ("Осло", "🇳🇴"), "zurich": ("Цюрих", "🇨🇭"),
@@ -62,7 +58,6 @@ CITY_DATA = {
     "vienna": ("Вена", "🇦🇹"), "prague": ("Прага", "🇨🇿"),
     "berlin": ("Берлин", "🇩🇪"), "munich": ("Мюнхен", "🇩🇪"),
     "lisbon": ("Лиссабон", "🇵🇹"), "dublin": ("Дублин", "🇮🇪"),
-    "copenhagen": ("Копенгаген", "🇩🇰"), "brussels": ("Брюссель", "🇧🇪"),
     "budapest": ("Будапешт", "🇭🇺"), "bucharest": ("Бухарест", "🇷🇴"),
     "sofia": ("София", "🇧🇬"), "athens": ("Афины", "🇬🇷"),
     "riga": ("Рига", "🇱🇻"), "tallinn": ("Таллин", "🇪🇪"),
@@ -75,16 +70,19 @@ CITY_DATA = {
     "miami": ("Майами", "🇺🇸"), "seattle": ("Сиэтл", "🇺🇸"),
     "sao paulo": ("Сан-Паулу", "🇧🇷"), "taipei": ("Тайбэй", "🇹🇼"),
     "mumbai": ("Мумбаи", "🇮🇳"), "delhi": ("Дели", "🇮🇳"),
-    "tel aviv": ("Тель-Авив", "🇮🇱"),
 }
 
 def clean_name(name):
-    """Очищает название от мусора"""
-    name = re.sub(r'\[.*?\]', '', name)      # [ipv6]
-    name = re.sub(r'\*[^*]+\*', '', name)    # *cidr*
-    name = re.sub(r'\*', '', name)           # *
-    name = re.sub(r'\bf\d+\b', '', name)     # f0, f1 и т.д.
-    name = re.sub(r'\b[a-z]{1,2}\b', '', name, flags=re.IGNORECASE)  # одиночные буквы
+    # URL-decode
+    name = unquote(name)
+    # Убираем эмодзи (они нам не нужны, мы свои добавим)
+    name = re.sub(r'[^\x00-\x7Fа-яА-Яa-zA-Z\s]', '', name)
+    # Убираем мусор
+    name = re.sub(r'\[.*?\]', '', name)
+    name = re.sub(r'\*[^*]+\*', '', name)
+    name = re.sub(r'\*', '', name)
+    name = re.sub(r'\bf\d+\b', '', name)
+    name = re.sub(r'\b[a-z]{1,2}\b', '', name, flags=re.IGNORECASE)
     name = name.replace('|', ' ').replace('-', ' ')
     name = re.sub(r'\s+', ' ', name).strip()
     return name
@@ -98,6 +96,7 @@ def extract_name(line):
 def get_transport(line):
     low = line.lower()
     if 'grpc' in low: return 'GRPC'
+    if 'xhttp' in low: return 'XHTTP'
     if 'ws' in low or 'websocket' in low: return 'WS'
     if 'reality' in low: return 'Reality'
     if 'tcp' in low: return 'TCP'
@@ -140,7 +139,6 @@ def process_configs(raw, is_premium):
                 configs.append(line)
 
         result = []
-        # ВАЖНО: is_premium=False -> CBN VPN, is_premium=True -> CBN VPN Premium
         result.append("#profile-title: CBN VPN Premium" if is_premium else "#profile-title: CBN VPN")
         result.append("#profile-update-interval: 6")
         result.append("")
@@ -169,7 +167,6 @@ def process_configs(raw, is_premium):
         print(f"Error: {e}")
         return raw
 
-# ============================================================
 _premium = {}
 _banned = {}
 _lock = threading.Lock()
@@ -211,16 +208,7 @@ def keep_alive():
         try: urllib.request.urlopen(RENDER_URL + "/health", timeout=10)
         except: pass
 
-def refresh_cache():
-    while True:
-        time.sleep(CACHE_TTL)
-        try:
-            urllib.request.urlopen(VPN_CONFIG_URL, timeout=20)
-            urllib.request.urlopen(OBHOD_CONFIG_URL, timeout=20)
-        except: pass
-
 threading.Thread(target=keep_alive, daemon=True).start()
-threading.Thread(target=refresh_cache, daemon=True).start()
 
 @app.route('/<int:user_id>')
 def serve_vpn(user_id):
@@ -261,7 +249,7 @@ def health():
 
 @app.route('/')
 def root():
-    return "CBN VPN v5.5", 200
+    return "CBN VPN v5.6", 200
 
 @app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
 def api_sp(uid, status):
@@ -300,6 +288,5 @@ def api_fc():
     return 'OK', 200
 
 if __name__ == '__main__':
-    print("CBN VPN Server v5.5")
-    print("Fixed: Premium label, clean f0, translate countries")
+    print("CBN VPN Server v5.6")
     app.run(host='0.0.0.0', port=5000, debug=False)
