@@ -1,16 +1,16 @@
 """
-CBN VPN Server - STATELESS VERSION
-Состояние в памяти, синхронизация с ботом.
-Переименование конфигов: флаги стран, перевод, 🌍 сохраняется.
+CBN VPN Server - v5.1
+Названия: Город + Флаг + Транспорт + Нумерация
+Anycast: 🌍 Anycast · Транспорт
 """
 
 import urllib.request
 import threading
 import time
-import json
 import re
 import base64
-from urllib.parse import unquote, quote
+import json
+from datetime import datetime
 from flask import Flask, request, Response, redirect
 
 app = Flask(__name__)
@@ -21,368 +21,316 @@ RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
 
-# ─── СЛОВАРЬ СТРАН С ФЛАГАМИ ────────────────────────────────
-COUNTRY_DATA = {
-    "Netherlands": {"name": "Нидерланды", "flag": "🇳🇱"},
-    "Germany": {"name": "Германия", "flag": "🇩🇪"},
-    "France": {"name": "Франция", "flag": "🇫🇷"},
-    "UK": {"name": "Англия", "flag": "🇬🇧"},
-    "United Kingdom": {"name": "Англия", "flag": "🇬🇧"},
-    "Sweden": {"name": "Швеция", "flag": "🇸🇪"},
-    "Switzerland": {"name": "Швейцария", "flag": "🇨🇭"},
-    "Finland": {"name": "Финляндия", "flag": "🇫🇮"},
-    "Norway": {"name": "Норвегия", "flag": "🇳🇴"},
-    "Poland": {"name": "Польша", "flag": "🇵🇱"},
-    "Italy": {"name": "Италия", "flag": "🇮🇹"},
-    "Spain": {"name": "Испания", "flag": "🇪🇸"},
-    "Austria": {"name": "Австрия", "flag": "🇦🇹"},
-    "Belgium": {"name": "Бельгия", "flag": "🇧🇪"},
-    "Czech": {"name": "Чехия", "flag": "🇨🇿"},
-    "Denmark": {"name": "Дания", "flag": "🇩🇰"},
-    "Ireland": {"name": "Ирландия", "flag": "🇮🇪"},
-    "Latvia": {"name": "Латвия", "flag": "🇱🇻"},
-    "Lithuania": {"name": "Литва", "flag": "🇱🇹"},
-    "Luxembourg": {"name": "Люксембург", "flag": "🇱🇺"},
-    "Romania": {"name": "Румыния", "flag": "🇷🇴"},
-    "Serbia": {"name": "Сербия", "flag": "🇷🇸"},
-    "Slovakia": {"name": "Словакия", "flag": "🇸🇰"},
-    "Slovenia": {"name": "Словения", "flag": "🇸🇮"},
-    "Bulgaria": {"name": "Болгария", "flag": "🇧🇬"},
-    "Hungary": {"name": "Венгрия", "flag": "🇭🇺"},
-    "Greece": {"name": "Греция", "flag": "🇬🇷"},
-    "Portugal": {"name": "Португалия", "flag": "🇵🇹"},
-    "Moldova": {"name": "Молдова", "flag": "🇲🇩"},
-    "Estonia": {"name": "Эстония", "flag": "🇪🇪"},
-    "Iceland": {"name": "Исландия", "flag": "🇮🇸"},
-    "Singapore": {"name": "Сингапур", "flag": "🇸🇬"},
-    "Japan": {"name": "Япония", "flag": "🇯🇵"},
-    "Hong Kong": {"name": "Гонконг", "flag": "🇭🇰"},
-    "South Korea": {"name": "Корея", "flag": "🇰🇷"},
-    "Taiwan": {"name": "Тайвань", "flag": "🇹🇼"},
-    "Vietnam": {"name": "Вьетнам", "flag": "🇻🇳"},
-    "Thailand": {"name": "Таиланд", "flag": "🇹🇭"},
-    "India": {"name": "Индия", "flag": "🇮🇳"},
-    "Indonesia": {"name": "Индонезия", "flag": "🇮🇩"},
-    "Malaysia": {"name": "Малайзия", "flag": "🇲🇾"},
-    "Philippines": {"name": "Филиппины", "flag": "🇵🇭"},
-    "China": {"name": "Китай", "flag": "🇨🇳"},
-    "Turkey": {"name": "Турция", "flag": "🇹🇷"},
-    "Israel": {"name": "Израиль", "flag": "🇮🇱"},
-    "Kazakhstan": {"name": "Казахстан", "flag": "🇰🇿"},
-    "USA": {"name": "США", "flag": "🇺🇸"},
-    "United States": {"name": "США", "flag": "🇺🇸"},
-    "Canada": {"name": "Канада", "flag": "🇨🇦"},
-    "Brazil": {"name": "Бразилия", "flag": "🇧🇷"},
-    "Mexico": {"name": "Мексика", "flag": "🇲🇽"},
-    "Argentina": {"name": "Аргентина", "flag": "🇦🇷"},
-    "UAE": {"name": "ОАЭ", "flag": "🇦🇪"},
-    "United Arab Emirates": {"name": "ОАЭ", "flag": "🇦🇪"},
-    "Russia": {"name": "Россия", "flag": "🇷🇺"},
-    "Anycast": {"name": "Универсальный", "flag": ""},
+# ============================================================
+# СЛОВАРЬ ГОРОДОВ
+# ============================================================
+CITY_DATA = {
+    "amsterdam": ("Амстердам", "🇳🇱"),
+    "frankfurt": ("Франкфурт", "🇩🇪"),
+    "helsinki": ("Хельсинки", "🇫🇮"),
+    "stockholm": ("Стокгольм", "🇸🇪"),
+    "oslo": ("Осло", "🇳🇴"),
+    "zurich": ("Цюрих", "🇨🇭"),
+    "paris": ("Париж", "🇫🇷"),
+    "london": ("Лондон", "🇬🇧"),
+    "moscow": ("Москва", "🇷🇺"),
+    "st petersburg": ("СПб", "🇷🇺"),
+    "saint petersburg": ("СПб", "🇷🇺"),
+    "kiev": ("Киев", "🇺🇦"),
+    "warsaw": ("Варшава", "🇵🇱"),
+    "madrid": ("Мадрид", "🇪🇸"),
+    "barcelona": ("Барселона", "🇪🇸"),
+    "rome": ("Рим", "🇮🇹"),
+    "milan": ("Милан", "🇮🇹"),
+    "vienna": ("Вена", "🇦🇹"),
+    "prague": ("Прага", "🇨🇿"),
+    "berlin": ("Берлин", "🇩🇪"),
+    "munich": ("Мюнхен", "🇩🇪"),
+    "hamburg": ("Гамбург", "🇩🇪"),
+    "lisbon": ("Лиссабон", "🇵🇹"),
+    "dublin": ("Дублин", "🇮🇪"),
+    "copenhagen": ("Копенгаген", "🇩🇰"),
+    "brussels": ("Брюссель", "🇧🇪"),
+    "budapest": ("Будапешт", "🇭🇺"),
+    "bucharest": ("Бухарест", "🇷🇴"),
+    "sofia": ("София", "🇧🇬"),
+    "athens": ("Афины", "🇬🇷"),
+    "riga": ("Рига", "🇱🇻"),
+    "tallinn": ("Таллин", "🇪🇪"),
+    "vilnius": ("Вильнюс", "🇱🇹"),
+    "belgrade": ("Белград", "🇷🇸"),
+    "bratislava": ("Братислава", "🇸🇰"),
+    "ljubljana": ("Любляна", "🇸🇮"),
+    "zagreb": ("Загреб", "🇭🇷"),
+    "istanbul": ("Стамбул", "🇹🇷"),
+    "dubai": ("Дубай", "🇦🇪"),
+    "tokyo": ("Токио", "🇯🇵"),
+    "osaka": ("Осака", "🇯🇵"),
+    "seoul": ("Сеул", "🇰🇷"),
+    "busan": ("Пусан", "🇰🇷"),
+    "sydney": ("Сидней", "🇦🇺"),
+    "melbourne": ("Мельбурн", "🇦🇺"),
+    "toronto": ("Торонто", "🇨🇦"),
+    "vancouver": ("Ванкувер", "🇨🇦"),
+    "new york": ("Нью-Йорк", "🇺🇸"),
+    "los angeles": ("Лос-Анджелес", "🇺🇸"),
+    "chicago": ("Чикаго", "🇺🇸"),
+    "dallas": ("Даллас", "🇺🇸"),
+    "miami": ("Майами", "🇺🇸"),
+    "seattle": ("Сиэтл", "🇺🇸"),
+    "san francisco": ("Сан-Франциско", "🇺🇸"),
+    "sao paulo": ("Сан-Паулу", "🇧🇷"),
+    "rio de janeiro": ("Рио", "🇧🇷"),
+    "mexico city": ("Мехико", "🇲🇽"),
+    "buenos aires": ("Буэнос-Айрес", "🇦🇷"),
+    "santiago": ("Сантьяго", "🇨🇱"),
+    "lima": ("Лима", "🇵🇪"),
+    "bogota": ("Богота", "🇨🇴"),
+    "singapore": ("Сингапур", "🇸🇬"),
+    "hong kong": ("Гонконг", "🇭🇰"),
+    "taipei": ("Тайбэй", "🇹🇼"),
+    "mumbai": ("Мумбаи", "🇮🇳"),
+    "delhi": ("Дели", "🇮🇳"),
+    "bangalore": ("Бангалор", "🇮🇳"),
+    "tel aviv": ("Тель-Авив", "🇮🇱"),
+    "jakarta": ("Джакарта", "🇮🇩"),
+    "bangkok": ("Бангкок", "🇹🇭"),
+    "kuala lumpur": ("Куала-Лумпур", "🇲🇾"),
+    "manila": ("Манила", "🇵🇭"),
+    "ho chi minh": ("Хошимин", "🇻🇳"),
+    "hanoi": ("Ханой", "🇻🇳"),
 }
 
-# ─── СОСТОЯНИЕ В ПАМЯТИ ────────────────────────────────────
-_premium_users: dict[int, bool] = {}
-_banned_users: dict[int, bool] = {}
-_state_lock = threading.Lock()
-
-def set_premium(user_id: int, status: bool):
-    with _state_lock:
-        _premium_users[user_id] = status
-    print(f"[state] premium user={user_id} status={status}")
-
-def set_banned(user_id: int, status: bool):
-    with _state_lock:
-        _banned_users[user_id] = status
-        if status:
-            _premium_users[user_id] = False
-        else:
-            if user_id in _banned_users:
-                del _banned_users[user_id]
-    print(f"[state] ban user={user_id} status={status}")
-
-def is_premium_user(user_id: int) -> bool:
-    with _state_lock:
-        if _banned_users.get(user_id):
-            return False
-        return _premium_users.get(user_id, False)
-
-def is_banned_user(user_id: int) -> bool:
-    with _state_lock:
-        return _banned_users.get(user_id, False)
-
-# ─── ПЕРЕВОД НАЗВАНИЙ ──────────────────────────────────────
-
-def clean_config_name(name: str) -> str:
-    """
-    Очищает название конфигурации:
-    - 🌍 для России → (все сервисы)
-    - 🌍 для Anycast → игнорируем
-    - Добавляет флаг страны
-    - Убирает города, номера, IPv6, CIDR, технические суффиксы
-    - Переводит страну на русский
-    - Anycast → Универсальный
-    """
-    
-    try:
-        decoded = unquote(name)
-    except:
-        decoded = name
-    
-    # Проверяем наличие 🌍
-    has_planet = '🌍' in decoded
-    
-    if has_planet:
-        cleaned_text = decoded.replace('🌍', '').strip()
-    else:
-        cleaned_text = decoded
-    
-    # Удаляем IPv6 адреса
-    cleaned_text = re.sub(r'\[?[0-9a-fA-F:]{10,}\]?', '', cleaned_text)
-    
-    # Удаляем CIDR маски
-    cleaned_text = re.sub(r'/\d{1,3}', '', cleaned_text)
-    
-    # Удаляем номера серверов
-    cleaned_text = re.sub(r'[-_#]\d{1,3}$', '', cleaned_text)
-    cleaned_text = re.sub(r'\s*\(\d+\)', '', cleaned_text)
-    cleaned_text = re.sub(r'\s*\[\d+\]', '', cleaned_text)
-    
-    # Убираем города (всё после дефиса)
-    parts = cleaned_text.split('-')
-    if len(parts) > 1:
-        cleaned_text = parts[0].strip()
-    
-    # Удаляем технические суффиксы
-    tech_suffixes = [
-        'IPv6', 'IPV6', 'ipv6', 'v6', 'V6',
-        'CIDR', 'cidr', 'CDN', 'cdn',
-        'NAT', 'nat', 'TUN', 'tun',
-        'Proxy', 'proxy', 'PROXY',
-        'Elite', 'elite', 'ELITE',
-        'Premium', 'premium', 'PREMIUM',
-        'VIP', 'vip',
-        'Pro', 'pro', 'PRO',
-        'Max', 'max', 'MAX',
-        'Plus', 'plus', 'PLUS',
-        'Lite', 'lite', 'LITE',
-        'Basic', 'basic', 'BASIC',
-        'Standard', 'standard', 'STANDARD',
-        'Ultra', 'ultra', 'ULTRA',
-        'Super', 'super', 'SUPER',
-        'Fast', 'fast', 'FAST',
-        'Turbo', 'turbo', 'TURBO',
-        'Extra', 'extra', 'EXTRA',
-        'Special', 'special', 'SPECIAL',
-    ]
-    
-    for suffix in tech_suffixes:
-        cleaned_text = re.sub(rf'\b{suffix}\b', '', cleaned_text, flags=re.IGNORECASE)
-        cleaned_text = re.sub(rf'-{suffix}$', '', cleaned_text, flags=re.IGNORECASE)
-        cleaned_text = re.sub(rf'_{suffix}$', '', cleaned_text, flags=re.IGNORECASE)
-    
-    # Чистим пробелы и дефисы
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
-    cleaned_text = re.sub(r'-+', '-', cleaned_text)
-    cleaned_text = cleaned_text.strip().strip('-').strip()
-    
-    # Anycast → Универсальный (без всяких приписок)
-    if 'anycast' in cleaned_text.lower():
-        return "Универсальный"
-    
-    # Ищем страну и добавляем флаг + перевод
-    for eng, data in COUNTRY_DATA.items():
-        if eng.lower() == cleaned_text.lower() or eng.lower() in cleaned_text.lower():
-            flag = data["flag"]
-            ru_name = data["name"]
-            
-            # ✅ Для России с 🌍 добавляем "(все сервисы)"
-            if has_planet and eng.lower() == "russia":
-                return f"{flag} {ru_name} (все сервисы)"
-            else:
-                return f"{flag} {ru_name}"
-    
-    # Если не нашли страну — возвращаем очищенное
-    return cleaned_text if cleaned_text else decoded
-
-
-def process_config_line(line: str) -> str:
-    """Обрабатывает строку конфигурации любого протокола"""
-    
-    # VLESS, Trojan, Hysteria, TUIC с #name в конце
-    if '#' in line and not line.startswith('vmess://'):
-        base_url, sep, name = line.rpartition('#')
-        new_name = clean_config_name(name)
-        encoded_name = quote(new_name, safe='')
-        return f"{base_url}#{encoded_name}"
-    
-    # Shadowsocks
-    if line.startswith('ss://') or line.startswith('ssr://'):
-        if '#' in line:
-            base_url, sep, name = line.rpartition('#')
-            new_name = clean_config_name(name)
-            encoded_name = quote(new_name, safe='')
-            return f"{base_url}#{encoded_name}"
-        return line
-    
-    # VMess
+def extract_host_port(line):
+    m = re.search(r'@([\d.]+):(\d+)', line)
+    if m:
+        return m.group(1), m.group(2)
     if line.startswith('vmess://'):
         try:
-            base64_part = line[8:]
-            padding = 4 - len(base64_part) % 4
+            b64 = line[8:]
+            padding = 4 - len(b64) % 4
             if padding != 4:
-                base64_part += '=' * padding
-            
-            decoded = base64.b64decode(base64_part).decode('utf-8')
-            config = json.loads(decoded)
-            
-            if 'ps' in config:
-                config['ps'] = clean_config_name(config['ps'])
-            
-            new_json = json.dumps(config, ensure_ascii=False)
-            new_base64 = base64.b64encode(new_json.encode('utf-8')).decode('utf-8')
-            return f"vmess://{new_base64}"
-        except Exception as e:
-            print(f"[translate] Ошибка обработки VMess: {e}")
-            return line
-    
-    # Hysteria2, TUIC и другие
-    if any(line.startswith(proto) for proto in ['hysteria2://', 'tuic://', 'vless://', 'trojan://']):
-        if '#' in line:
-            base_url, sep, name = line.rpartition('#')
-            new_name = clean_config_name(name)
-            encoded_name = quote(new_name, safe='')
-            return f"{base_url}#{encoded_name}"
-        return line
-    
-    return line
+                b64 += '=' * padding
+            decoded = base64.b64decode(b64).decode('utf-8')
+            data = json.loads(decoded)
+            return data.get('add'), str(data.get('port', '443'))
+        except:
+            pass
+    return None, None
 
-
-def translate_config_text(config_text: str) -> str:
-    """Обрабатывает весь конфиг"""
-    if not config_text:
-        return config_text
-    
-    lines = config_text.strip().split('\n')
-    result_lines = []
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            result_lines.append('')
-            continue
-        
+def extract_name(line):
+    m = re.search(r'#([^#\n]+)$', line)
+    if m:
+        return m.group(1).strip()
+    if line.startswith('vmess://'):
         try:
-            processed_line = process_config_line(line)
-            result_lines.append(processed_line)
-        except Exception as e:
-            print(f"[translate] Ошибка обработки строки: {e}")
-            result_lines.append(line)
-    
-    return '\n'.join(result_lines)
+            b64 = line[8:]
+            padding = 4 - len(b64) % 4
+            if padding != 4:
+                b64 += '=' * padding
+            decoded = base64.b64decode(b64).decode('utf-8')
+            data = json.loads(decoded)
+            return data.get('ps', '')
+        except:
+            pass
+    return ""
 
-# ─── КЭШ КОНФИГОВ ─────────────────────────────────────────
-_cache = {
-    "vpn":  {"data": None, "translated": None, "updated_at": 0, "updating": False},
-    "obs":  {"data": None, "translated": None, "updated_at": 0, "updating": False},
-}
-_cache_lock = threading.Lock()
+def get_transport(line):
+    """Определяет транспорт: WS, TCP, GRPC, Reality"""
+    low = line.lower()
+    if 'grpc' in low:
+        return 'GRPC'
+    elif 'ws' in low:
+        return 'WS'
+    elif 'reality' in low:
+        return 'Reality'
+    elif 'tcp' in low:
+        return 'TCP'
+    return ''
 
-def _download(url: str, timeout: int = 30, retries: int = 3) -> bytes:
-    last_err = None
-    for attempt in range(retries):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
-        except Exception as e:
-            last_err = e
-            if attempt < retries - 1:
-                time.sleep(2 ** attempt)
-    raise last_err
+def is_anycast(line):
+    low = line.lower()
+    name = extract_name(line).lower()
+    return 'anycast' in low or 'anycast' in name
 
-def _warm_one(key: str, url: str):
+def is_cdn(line):
+    low = line.lower()
+    name = extract_name(line).lower()
+    return 'cdn' in low or 'cdn' in name
+
+def is_reality(line):
+    return 'reality' in line.lower()
+
+def get_icon(line):
+    if is_anycast(line):
+        return "🌍"
+    elif is_cdn(line):
+        return "📡"
+    elif is_reality(line):
+        return "🔒"
+    return "🌐"
+
+def find_city(name):
+    name_lower = name.lower().replace('-', ' ').replace('_', ' ')
+    for city_key, (rus, flag) in CITY_DATA.items():
+        if city_key in name_lower:
+            return rus, flag
+    words = [w for w in name_lower.split() if len(w) > 2]
+    if words:
+        return words[0].capitalize(), ""
+    return name[:12], ""
+
+def create_name(line):
+    name = extract_name(line)
+    icon = get_icon(line)
+    transport = get_transport(line)
+
+    if is_anycast(line):
+        if transport:
+            return f"{icon} Anycast · {transport}"
+        return f"{icon} Anycast"
+
+    city, flag = find_city(name)
+    if flag:
+        base = f"{icon} {city} {flag}"
+    else:
+        base = f"{icon} {city}"
+
+    if transport:
+        return f"{base} · {transport}"
+    return base
+
+def process_configs(raw, is_premium=False):
     try:
-        data = _download(url)
-        translated = translate_config_text(data.decode('utf-8')).encode('utf-8')
-        
-        with _cache_lock:
-            _cache[key]["data"] = data
-            _cache[key]["translated"] = translated
-            _cache[key]["updated_at"] = time.time()
-            _cache[key]["updating"] = False
-        print(f"[cache] Обновлён {key}: {len(data)} байт → переведён")
+        content = raw.decode('utf-8', errors='ignore')
+        lines = content.split('\n')
+
+        configs = []
+        for line in lines:
+            line = line.strip()
+            if line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'tuic://')):
+                configs.append(line)
+
+        result = []
+        result.append("#profile-title: CBN VPN Premium" if is_premium else "#profile-title: CBN VPN")
+        result.append("#profile-update-interval: 6")
+        result.append("")
+
+        # Считаем повторения для нумерации
+        name_counts = {}
+        final_names = []
+
+        for line in configs:
+            clean = re.sub(r'\?.*$', '', line)
+            if '#' in clean:
+                clean = clean[:clean.rfind('#')]
+            if clean not in [x[0] for x in final_names]:
+                name = create_name(line)
+                final_names.append((clean, name))
+                name_counts[name] = name_counts.get(name, 0) + 1
+
+        # Второй проход: добавляем нумерацию если есть повторы
+        name_index = {}
+        for clean, name in final_names:
+            if name_counts[name] > 1:
+                name_index[name] = name_index.get(name, 0) + 1
+                display_name = f"{name} #{name_index[name]}"
+            else:
+                display_name = name
+
+            if '#' in line:
+                base = line[:line.rfind('#')]
+            else:
+                base = line
+            base = re.sub(r'#[^#]*$', '', base)
+            result.append(f"{base}#{display_name}")
+
+        return '\n'.join(result).encode('utf-8')
     except Exception as e:
-        with _cache_lock:
-            _cache[key]["updating"] = False
-        print(f"[cache] Не удалось скачать {key}: {e}")
+        print(f"Error: {e}")
+        return raw
 
-def get_config(key: str, url: str) -> bytes:
-    with _cache_lock:
-        entry = _cache[key]
-        cache_has_data = entry["translated"] is not None
-        cache_fresh = cache_has_data and (time.time() - entry["updated_at"]) < CACHE_TTL
-        already_updating = entry.get("updating", False)
+# ============================================================
+# СОСТОЯНИЕ
+# ============================================================
+_premium = {}
+_banned = {}
+_lock = threading.Lock()
 
-    if cache_fresh:
-        return entry["translated"]
+def set_premium(uid, s):
+    with _lock: _premium[uid] = s
 
-    if cache_has_data and not already_updating:
-        with _cache_lock:
-            _cache[key]["updating"] = True
-        threading.Thread(target=_warm_one, args=(key, url), daemon=True).start()
-        return entry["translated"]
+def set_banned(uid, s):
+    with _lock:
+        _banned[uid] = s
+        if s: _premium[uid] = False
 
-    try:
-        data = _download(url)
-        translated = translate_config_text(data.decode('utf-8')).encode('utf-8')
-        with _cache_lock:
-            _cache[key]["data"] = data
-            _cache[key]["translated"] = translated
-            _cache[key]["updated_at"] = time.time()
-            _cache[key]["updating"] = False
-        return translated
-    except Exception as e:
-        print(f"[cache] Не удалось скачать {key}: {e}")
-        raise
+def is_premium_user(uid):
+    with _lock:
+        return False if _banned.get(uid) else _premium.get(uid, False)
 
-def _refresh_cache():
-    threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True).start()
-    threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True).start()
-    while True:
-        time.sleep(CACHE_TTL)
-        threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True).start()
-        threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True).start()
+def is_banned_user(uid):
+    with _lock:
+        return _banned.get(uid, False)
 
+# ============================================================
+# КЭШ
+# ============================================================
+_raw = {}
+_raw_lock = threading.Lock()
+
+def get_raw(url):
+    with _raw_lock:
+        if url in _raw:
+            data, ts = _raw[url]
+            if time.time() - ts < CACHE_TTL:
+                return data
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    data = urllib.request.urlopen(req, timeout=20).read()
+    with _raw_lock:
+        _raw[url] = (data, time.time())
+    return data
+
+# ============================================================
+# ФОН
+# ============================================================
 def keep_alive():
     while True:
         time.sleep(600)
+        try: urllib.request.urlopen(RENDER_URL + "/health", timeout=10)
+        except: pass
+
+def refresh_cache():
+    while True:
+        time.sleep(CACHE_TTL)
         try:
-            urllib.request.urlopen(RENDER_URL + "/health", timeout=10)
-        except Exception:
-            pass
+            urllib.request.urlopen(VPN_CONFIG_URL, timeout=20)
+            urllib.request.urlopen(OBHOD_CONFIG_URL, timeout=20)
+        except: pass
 
 threading.Thread(target=keep_alive, daemon=True).start()
-threading.Thread(target=_refresh_cache, daemon=True).start()
+threading.Thread(target=refresh_cache, daemon=True).start()
 
-# ─── МАРШРУТЫ ─────────────────────────────────────────────
+# ============================================================
+# МАРШРУТЫ
+# ============================================================
 @app.route('/<int:user_id>')
 def serve_vpn(user_id):
     if is_banned_user(user_id):
         return '', 200
     try:
-        content = get_config("vpn", VPN_CONFIG_URL)
-        return Response(
-            content, 
-            status=200, 
-            headers={
-                "Content-Type": "text/plain; charset=utf-8", 
-                "profile-title": "CBN VPN", 
-                "Cache-Control": "no-store, no-cache, must-revalidate"
-            }
-        )
-    except Exception as e:
-        return f"upstream error: {e}", 502
+        is_prem = is_premium_user(user_id)
+        content = process_configs(get_raw(VPN_CONFIG_URL), is_prem)
+        title = "CBN VPN Premium" if is_prem else "CBN VPN"
+        return Response(content, status=200, headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "profile-title": title,
+        })
+    except:
+        return Response(get_raw(VPN_CONFIG_URL), status=200, headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "profile-title": "CBN VPN",
+        })
 
 @app.route('/<int:user_id>/obs')
 def serve_obs(user_id):
@@ -391,121 +339,62 @@ def serve_obs(user_id):
     if not is_premium_user(user_id):
         return redirect(VPN_CONFIG_URL, code=302)
     try:
-        content = get_config("obs", OBHOD_CONFIG_URL)
-        return Response(
-            content, 
-            status=200, 
-            headers={
-                "Content-Type": "text/plain; charset=utf-8", 
-                "profile-title": "CBN VPN Premium", 
-                "Cache-Control": "no-store, no-cache, must-revalidate"
-            }
-        )
-    except Exception:
+        content = process_configs(get_raw(OBHOD_CONFIG_URL), True)
+        return Response(content, status=200, headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "profile-title": "CBN VPN Premium",
+        })
+    except:
         return redirect(OBHOD_CONFIG_URL, code=302)
 
-# ─── HEALTH CHECK ─────────────────────────────────────────
 @app.route('/health')
 def health():
-    with _state_lock:
-        return {
-            "status": "ok", 
-            "timestamp": time.time(), 
-            "premium": len(_premium_users), 
-            "banned": len(_banned_users)
-        }, 200
+    return {"status": "ok"}, 200
 
 @app.route('/')
 def root():
-    with _state_lock:
-        return f"CBN VPN Server Online | premium={len(_premium_users)} banned={len(_banned_users)}", 200
+    return "CBN VPN Server v5.1", 200
 
-# ─── ADMIN API ────────────────────────────────────────────
-@app.route('/set_premium/<int:user_id>/<int:status>', methods=['POST'])
-def api_set_premium(user_id, status):
-    secret = request.headers.get('X-Secret', '')
-    if secret != SECRET_KEY:
-        return 'Forbidden', 403
-    set_premium(user_id, bool(status))
+# ============================================================
+# ADMIN API
+# ============================================================
+@app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
+def api_sp(uid, status):
+    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
+    set_premium(uid, bool(status))
     return 'OK', 200
 
-@app.route('/unban_user/<int:user_id>', methods=['POST'])
-def api_unban_user(user_id):
-    secret = request.headers.get('X-Secret', '')
-    if secret != SECRET_KEY:
-        return 'Forbidden', 403
-    set_banned(user_id, False)
+@app.route('/unban_user/<int:uid>', methods=['POST'])
+def api_ub(uid):
+    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
+    set_banned(uid, False)
     return 'OK', 200
 
-@app.route('/delete_user/<int:user_id>', methods=['POST'])
-def api_delete_user(user_id):
-    secret = request.headers.get('X-Secret', '')
-    if secret != SECRET_KEY:
-        return 'Forbidden', 403
-    set_banned(user_id, True)
+@app.route('/delete_user/<int:uid>', methods=['POST'])
+def api_du(uid):
+    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
+    set_banned(uid, True)
     return 'OK', 200
 
 @app.route('/sync', methods=['POST'])
 def api_sync():
-    secret = request.headers.get('X-Secret', '')
-    if secret != SECRET_KEY:
-        return 'Forbidden', 403
-    
+    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
     data = request.get_json(silent=True)
-    if not data:
-        return 'Bad JSON', 400
-    
-    premium_ids = set(int(i) for i in data.get('premium', []))
-    banned_ids = set(int(i) for i in data.get('banned', []))
-    
-    with _state_lock:
-        _premium_users.clear()
-        _banned_users.clear()
-        for uid in premium_ids:
-            _premium_users[uid] = True
-        for uid in banned_ids:
-            _banned_users[uid] = True
-    
-    print(f"[state] sync: {len(premium_ids)} premium, {len(banned_ids)} banned")
+    if not data: return 'Bad JSON', 400
+    with _lock:
+        _premium.clear()
+        _banned.clear()
+        for uid in data.get('premium', []): _premium[int(uid)] = True
+        for uid in data.get('banned', []): _banned[int(uid)] = True
     return 'OK', 200
 
 @app.route('/flush_cache', methods=['POST'])
-def flush_cache():
-    secret = request.headers.get('X-Secret', '')
-    if secret != SECRET_KEY:
-        return 'Forbidden', 403
-    
-    with _cache_lock:
-        for key in _cache:
-            _cache[key]["data"] = None
-            _cache[key]["translated"] = None
-            _cache[key]["updated_at"] = 0
-            _cache[key]["updating"] = False
-    
-    threading.Thread(target=_warm_one, args=("vpn", VPN_CONFIG_URL), daemon=True).start()
-    threading.Thread(target=_warm_one, args=("obs", OBHOD_CONFIG_URL), daemon=True).start()
-    print("[cache] Принудительный сброс кэша выполнен")
-    return 'OK — cache flushed, reloading in background', 200
-
-@app.route('/check_batch', methods=['POST'])
-def api_check_batch():
-    secret = request.headers.get('X-Secret', '')
-    if secret != SECRET_KEY:
-        return 'Forbidden', 403
-    
-    data = request.get_json(silent=True)
-    if not data or 'user_ids' not in data:
-        return 'Bad request', 400
-    
-    results = {}
-    for user_id in data['user_ids']:
-        uid = int(user_id)
-        results[str(uid)] = {
-            'banned': is_banned_user(uid),
-            'premium': is_premium_user(uid)
-        }
-    
-    return results, 200
+def api_fc():
+    if request.headers.get('X-Secret') != SECRET_KEY: return 'Forbidden', 403
+    with _raw_lock: _raw.clear()
+    return 'OK', 200
 
 if __name__ == '__main__':
+    print("CBN VPN Server v5.1")
+    print("Format: City + Flag + Transport + Numbering")
     app.run(host='0.0.0.0', port=5000, debug=False)
