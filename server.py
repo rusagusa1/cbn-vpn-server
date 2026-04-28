@@ -104,9 +104,13 @@ def is_anycast(line):
 
 def find_location(name):
     name_lower = name.lower().strip()
+    # Точное совпадение
     for key in sorted(CITY_DATA.keys(), key=len, reverse=True):
         if key in name_lower:
             return CITY_DATA[key]
+    # Частичное совпадение
+    if 'united' in name_lower:
+        return ("США", "🇺🇸")  # По умолчанию США, можно и UK
     words = [w for w in name_lower.split() if len(w) > 2]
     return (words[0].capitalize(), "") if words else (name[:15], "")
 
