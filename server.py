@@ -71,6 +71,7 @@ CITY_DATA = {
     "miami": ("Майами", "🇺🇸"), "seattle": ("Сиэтл", "🇺🇸"),
     "sao paulo": ("Сан-Паулу", "🇧🇷"), "taipei": ("Тайбэй", "🇹🇼"),
     "mumbai": ("Мумбаи", "🇮🇳"), "delhi": ("Дели", "🇮🇳"),
+    "moldova": ("Молдова", "🇲🇩"), "philippines": ("Филиппины", "🇵🇭"),
 }
 
 def clean_name(name):
