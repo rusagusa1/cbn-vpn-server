@@ -580,12 +580,11 @@ def serve_filter(user_id):
     except:
         return Response(get_raw(VPN_CONFIG_URL), status=200, headers={"Content-Type": "text/plain; charset=utf-8"})
 
-@app.route('/profile/<parent_id>/<int:child_id>')
+@app.route('/profile/<int:parent_id>/<int:child_id>')
 def serve_child(parent_id, child_id):
     if is_banned_user(parent_id) or not is_premium_user(parent_id):
         return '', 200
-    if not is_premium_user(child_id):
-        return 'Not allowed', 403
+    # child_id наследует доступ от parent_id
     return serve_vpn(child_id)
 
 @app.route('/health')
