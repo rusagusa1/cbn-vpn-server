@@ -1,11 +1,11 @@
 """
-CBN VPN Server - v5.10
+CBN VPN Server - v5.10 (legacy‑compatible)
 - Фильтрация по локации (locs)
 - Семейный доступ (sub_accounts)
-- Gzip-сжатие (Flask-Compress)
+- Gzip‑сжатие (встроенный модуль gzip, без flask-compress)
 - Кэширование реального пинга
 - Расширенный перевод стран/городов (~200 записей)
-- Все предыдущие функции сохранены
+- Запуск: python server.py (порт из $PORT или 5000)
 """
 
 import urllib.request
@@ -14,22 +14,43 @@ import time
 import re
 import subprocess
 import platform
+import os
+import gzip
 from datetime import datetime
 from urllib.parse import unquote
 from flask import Flask, request, Response, redirect
-from flask_compress import Compress
 
 app = Flask(__name__)
-Compress(app)  # V5.10: все ответы сжимаются
 
+# =========================================================
+# ВСТРОЕННОЕ GZIP-СЖАТИЕ (без flask-compress)
+# =========================================================
+@app.after_request
+def compress_response(response):
+    """Сжимаем gzip, если клиент поддерживает."""
+    if 'gzip' in request.headers.get('Accept-Encoding', '').lower():
+        if response.direct_passthrough:
+            return response
+        content = response.get_data()
+        if len(content) < 500:  # маленькие ответы не сжимаем
+            return response
+        compressed = gzip.compress(content)
+        response.set_data(compressed)
+        response.headers['Content-Encoding'] = 'gzip'
+        response.headers['Content-Length'] = str(len(compressed))
+    return response
+
+# =========================================================
+# URL И КЛЮЧИ
+# =========================================================
 VPN_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt"
 OBHOD_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt"
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
-CACHE_TTL = 900  # 15 минут
+CACHE_TTL = 900
 
 # =========================================================
-# ПОЛНЫЙ СЛОВАРЬ СТРАН И ГОРОДОВ
+# ПОЛНЫЙ СЛОВАРЬ СТРАН И ГОРОДОВ (никаких сокращений)
 # =========================================================
 CITY_DATA = {
     # Страны
@@ -450,7 +471,7 @@ def process_configs(raw, filter_locations: list | None = None, ping_map: dict | 
 # Состояние пользователей (с sub_accounts)
 # =========================================================
 _premium = {}; _banned = {}; _lock = threading.Lock()
-_sub_accounts = {}  # parent_id -> set(child_id)
+_sub_accounts = {}
 
 def set_premium(uid, s):
     with _lock: _premium[uid] = s
@@ -613,5 +634,6 @@ def api_fc():
     return 'OK', 200
 
 if __name__ == '__main__':
-    print("CBN VPN v5.10 | Global | Gzip | Ping Cache")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    print(f"CBN VPN v5.10 | Legacy | Port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
