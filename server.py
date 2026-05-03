@@ -343,7 +343,7 @@ def extract_hosts_from_config(raw: bytes) -> list:
     content = raw.decode('utf-8', errors='ignore')
     lines = content.split('\n')
     for line in lines:
-        if not line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'tuic://')):
+        if not line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'hysteria2://', 'tuic://')):
             continue
         match = re.search(r'@([^:]+):', line)
         if match:
@@ -435,7 +435,7 @@ def process_configs(raw, filter_locations: list | None = None, ping_map: dict | 
     try:
         content = raw.decode('utf-8', errors='ignore')
         lines = content.split('\n')
-        configs = [l.strip() for l in lines if l.strip() and l.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'tuic://'))]
+        configs = [l.strip() for l in lines if l.strip() and l.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'hysteria2://', 'tuic://'))]
 
         if filter_locations:
             filtered = []
