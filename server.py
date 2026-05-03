@@ -543,7 +543,8 @@ def keep_alive():
         except: pass
 
 threading.Thread(target=keep_alive, daemon=True).start()
-threading.Thread(target=update_ping_cache, daemon=True).start()
+# update_ping_cache отключён - блокирует Flask при большом количестве хостов
+# threading.Thread(target=update_ping_cache, daemon=True).start()
 
 # =========================================================
 # Маршруты
@@ -636,4 +637,4 @@ def api_fc():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print(f"CBN VPN v5.10 | Legacy | Port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
