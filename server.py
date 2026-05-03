@@ -624,7 +624,10 @@ def api_sync():
         for uid in data.get('premium', []): _premium[int(uid)] = True
         for uid in data.get('banned', []): _banned[int(uid)] = True
         if 'sub_accounts' in data:
-            set_sub_accounts(data['sub_accounts'])
+            # Обновляем sub_accounts напрямую (без повторного захвата _lock)
+            _sub_accounts.clear()
+            for parent_id, children in data['sub_accounts'].items():
+                _sub_accounts[int(parent_id)] = set(children)
     return 'OK', 200
 
 @app.route('/flush_cache', methods=['POST'])
