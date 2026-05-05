@@ -1,9 +1,9 @@
 """
-CBN VPN Server - v5.19 (ALL configs preserved)
-- Сохраняются ВСЕ конфиги (без удаления дубликатов по base)
-- Поддержка всех протоколов (vless, vmess, trojan, ss, hysteria, hysteria2, tuic)
+CBN VPN Server - v5.20 FINAL
+- Поддержка всех протоколов, включая ssr://
+- Сохраняются ВСЕ конфиги (без удаления дубликатов)
 - Игнорирование невалидных хостов (0.0.0.0)
-- Заголовки Standard / Premium
+- Заголовки Standard / Premium (исправлен текст Premium)
 - Персонализированный кэш для премиум-подписок (user_id)
 - При отсутствии премиума отдаётся 403 (без редиректа)
 - Без семейного доступа, без фильтрации
@@ -306,7 +306,7 @@ CITY_DATA = {
 }
 
 # =========================================================
-# ЗАГОЛОВКИ ПОДПИСОК
+# ЗАГОЛОВКИ ПОДПИСОК (текст Premium исправлен)
 # =========================================================
 STANDARD_HEADERS = """#profile-title: CBN VPN Standard
 #profile-update-interval: 2
@@ -317,7 +317,7 @@ STANDARD_HEADERS = """#profile-title: CBN VPN Standard
 PREMIUM_HEADERS = """#profile-title: CBN VPN Premium
 #profile-update-interval: 2
 #support-url: https://t.me/CBN_VPN
-#announce: Премиум-подписка, предназначенная для обхода белых списков ("глушилок"). Использовать исклю��ительно на мобильном интернете и только при белых списках.
+#announce: Премиум-подписка, предназначенная для обхода белых списков ("глушилок"). Использовать исключительно на мобильном интернете и только при белых списках.
 """
 
 # =========================================================
@@ -380,7 +380,7 @@ def create_name(line, ping_map=None):
     return f"{base} · {transport}" if transport else base
 
 # =========================================================
-# ОБРАБОТКА КОНФИГОВ (СОХРАНЯЕМ ВСЕ, БЕЗ УДАЛЕНИЯ ДУБЛИКАТОВ)
+# ОБРАБОТКА КОНФИГОВ (поддержка ssr://, сохраняем все)
 # =========================================================
 def process_configs(raw, headers=""):
     try:
@@ -392,7 +392,8 @@ def process_configs(raw, headers=""):
             # Пропускаем строки с заголовками
             if line.startswith('#'):
                 continue
-            if not line or not line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'hysteria2://', 'tuic://')):
+            # Принимаем все известные протоколы, включая ssr://
+            if not line or not line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'ssr://', 'hysteria://', 'hysteria2://', 'tuic://')):
                 continue
             # Игнорируем невалидные хосты
             match = re.search(r'@([^:]+):', line)
@@ -402,15 +403,15 @@ def process_configs(raw, headers=""):
                 continue
             configs.append(line)
 
-        # Сначала строим имена для всех конфигов (без удаления)
+        # Строим имена для всех конфигов (без удаления)
         name_counts = {}
-        config_names = []   # список кортежей (оригинальная строка, имя)
+        config_names = []
         for line in configs:
             name = create_name(line)
             config_names.append((line, name))
             name_counts[name] = name_counts.get(name, 0) + 1
 
-        # Генерируем результат с нумерацией, если имя повторяется
+        # Генерируем результат с нумерацией
         result = []
         name_index = {}
         for line, name in config_names:
@@ -519,7 +520,7 @@ def health():
 
 @app.route('/')
 def root():
-    return "CBN VPN v5.19", 200
+    return "CBN VPN v5.20", 200
 
 @app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
 def api_sp(uid, status):
@@ -559,5 +560,5 @@ def api_fc():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"CBN VPN v5.19 | ALL configs | Port {port}")
+    print(f"CBN VPN v5.20 | ssr support | Port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
