@@ -1,11 +1,12 @@
 """
-CBN VPN Server - v5.16 FULL
-- Оригинальные функции перевода имён (как в первом server.py)
-- Полный словарь стран и городов (~200 записей)
-- Заголовки Standard/Premium подписок
-- Игнорирование невалидных хостов (0.0.0.0)
+CBN VPN Server - v5.17 FINAL
+- Новый премиум-источник
+- Персонализированный кэш для премиум-подписок (user_id)
+- Оригинальная обработка имён (как в первой версии)
+- Заголовки Standard / Premium
+- Игнорирование 0.0.0.0
 - Без семейного доступа, без фильтрации
-- Gzip-сжатие
+- Gzip‑сжатие
 """
 
 import urllib.request
@@ -41,14 +42,13 @@ def compress_response(response):
 # URL И КЛЮЧИ
 # =========================================================
 VPN_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt"
-# Замените на актуальный URL премиум-конфигов
-OBHOD_CONFIG_URL = "https://raw.githubusercontent.com/ShadowException/VPN/refs/heads/main/configs/VPN-cat-top-100"
+OBHOD_CONFIG_URL = "https://raw.githubusercontent.com/ShadowException/VPN/refs/heads/main/configs/VPN-cat-top-100"  # новый
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
 
 # =========================================================
-# ПОЛНЫЙ СЛОВАРЬ СТРАН И ГОРОДОВ (из первого server.py)
+# СЛОВАРЬ СТРАН И ГОРОДОВ (полный, как в первой версии)
 # =========================================================
 CITY_DATA = {
     # Страны
@@ -320,7 +320,7 @@ PREMIUM_HEADERS = """#profile-title: CBN VPN Premium
 """
 
 # =========================================================
-# ОРИГИНАЛЬНЫЕ ФУНКЦИИ ПЕРЕВОДА ИМЁН (из первого server.py)
+# ОРИГИНАЛЬНЫЕ ФУНКЦИИ ОБРАБОТКИ ИМЁН (из первого server.py)
 # =========================================================
 def clean_name(name):
     name = unquote(name)
@@ -379,7 +379,7 @@ def create_name(line, ping_map=None):
     return f"{base} · {transport}" if transport else base
 
 # =========================================================
-# ОБРАБОТКА КОНФИГОВ (оригинальная логика + фильтр 0.0.0.0)
+# ОБРАБОТКА КОНФИГОВ (с фильтром 0.0.0.0)
 # =========================================================
 def process_configs(raw, headers=""):
     try:
@@ -390,7 +390,7 @@ def process_configs(raw, headers=""):
             line = line.strip()
             if not line or not line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'hysteria2://', 'tuic://')):
                 continue
-            # Игнорируем заведомо невалидные хосты
+            # Игнорируем невалидные хосты
             match = re.search(r'@([^:]+):', line)
             if not match:
                 match = re.search(r'://([^:]+):', line)
@@ -444,7 +444,7 @@ def is_banned_user(uid):
         return _banned.get(uid, False)
 
 # =========================================================
-# КЭШ И ЗАГРУЗКА
+# КЭШ И ЗАГРУЗКА (с персональным ключом для премиум)
 # =========================================================
 _raw = {}; _raw_lock = threading.Lock()
 _processed = {}; _processed_lock = threading.Lock()
@@ -459,9 +459,9 @@ def get_raw(url):
     with _raw_lock: _raw[url] = (data, time.time())
     return data
 
-def get_processed(url, headers=""):
+def get_processed(url, headers="", user_id=None):
     with _processed_lock:
-        cache_key = url + headers
+        cache_key = url + headers + (str(user_id) if user_id else "")
         if cache_key in _processed:
             data, ts = _processed[cache_key]
             if time.time() - ts < CACHE_TTL: return data
@@ -500,7 +500,8 @@ def serve_obs(user_id):
     if not is_premium_user(user_id):
         return redirect(VPN_CONFIG_URL, code=302)
     try:
-        content = get_processed(OBHOD_CONFIG_URL, PREMIUM_HEADERS)
+        # персональный кэш по user_id
+        content = get_processed(OBHOD_CONFIG_URL, PREMIUM_HEADERS, user_id)
         return Response(content, status=200, headers={"Content-Type": "text/plain; charset=utf-8", "profile-title": "CBN VPN Premium"})
     except:
         return redirect(OBHOD_CONFIG_URL, code=302)
@@ -511,7 +512,7 @@ def health():
 
 @app.route('/')
 def root():
-    return "CBN VPN v5.16", 200
+    return "CBN VPN v5.17", 200
 
 @app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
 def api_sp(uid, status):
@@ -551,5 +552,5 @@ def api_fc():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"CBN VPN v5.16 FULL | Port {port}")
+    print(f"CBN VPN v5.17 | Personal cache | Port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
