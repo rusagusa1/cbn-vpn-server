@@ -1,12 +1,14 @@
 """
-CBN VPN Server - v5.17 FINAL
-- Новый премиум-источник
-- Персонализированный кэш для премиум-подписок (user_id)
+CBN VPN Server - v5.18 FINAL
 - Оригинальная обработка имён (как в первой версии)
+- Поддержка всех протоколов (vless, vmess, trojan, ss, hysteria, hysteria2, tuic)
+- Игнорирование невалидных хостов (0.0.0.0)
 - Заголовки Standard / Premium
-- Игнорирование 0.0.0.0
+- Персонализированный кэш для премиум-подписок (user_id)
+- При отсутствии премиума отдаётся 403 (без редиректа)
+- Без удаления дубликатов (все конфиги сохраняются)
 - Без семейного доступа, без фильтрации
-- Gzip‑сжатие
+- Gzip-сжатие
 """
 
 import urllib.request
@@ -42,13 +44,13 @@ def compress_response(response):
 # URL И КЛЮЧИ
 # =========================================================
 VPN_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt"
-OBHOD_CONFIG_URL = "https://raw.githubusercontent.com/ShadowException/VPN/refs/heads/main/configs/VPN-cat-top-100"  # новый
+OBHOD_CONFIG_URL = "https://raw.githubusercontent.com/ShadowException/VPN/refs/heads/main/configs/VPN-cat-top-100"
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
 
 # =========================================================
-# СЛОВАРЬ СТРАН И ГОРОДОВ (полный, как в первой версии)
+# ПОЛНЫЙ СЛОВАРЬ СТРАН И ГОРОДОВ (из первой версии)
 # =========================================================
 CITY_DATA = {
     # Страны
@@ -320,7 +322,7 @@ PREMIUM_HEADERS = """#profile-title: CBN VPN Premium
 """
 
 # =========================================================
-# ОРИГИНАЛЬНЫЕ ФУНКЦИИ ОБРАБОТКИ ИМЁН (из первого server.py)
+# ОРИГИНАЛЬНЫЕ ФУНКЦИИ ПЕРЕВОДА ИМЁН (из первого server.py)
 # =========================================================
 def clean_name(name):
     name = unquote(name)
@@ -379,7 +381,7 @@ def create_name(line, ping_map=None):
     return f"{base} · {transport}" if transport else base
 
 # =========================================================
-# ОБРАБОТКА КОНФИГОВ (с фильтром 0.0.0.0)
+# ОБРАБОТКА КОНФИГОВ (поддержка vmess, игнор 0.0.0.0, без удаления дублей)
 # =========================================================
 def process_configs(raw, headers=""):
     try:
@@ -388,6 +390,9 @@ def process_configs(raw, headers=""):
         configs = []
         for line in lines:
             line = line.strip()
+            # Пропускаем строки с заголовками
+            if line.startswith('#'):
+                continue
             if not line or not line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'hysteria2://', 'tuic://')):
                 continue
             # Игнорируем невалидные хосты
@@ -398,6 +403,7 @@ def process_configs(raw, headers=""):
                 continue
             configs.append(line)
 
+        # Строим имена и подсчитываем повторы для нумерации
         name_counts = {}
         config_list = []
         for line in configs:
@@ -415,7 +421,16 @@ def process_configs(raw, headers=""):
                 display = f"{name} #{name_index[name]}"
             else:
                 display = name
-            result.append(f"{base}#{display}")
+            # Ищем соответствующую строку в исходных конфигах
+            line = next((l for l in configs if (l[:l.rfind('#')] if '#' in l else l) == base), None)
+            if line:
+                # Заменяем комментарий в строке на наше красивое имя
+                if '#' in line:
+                    result.append(f"{line[:line.rfind('#')]}#{display}")
+                else:
+                    result.append(f"{line}#{display}")
+            else:
+                result.append(f"{base}#{display}")
 
         full_config = headers + '\n'.join(result)
         return full_config.encode('utf-8')
@@ -444,7 +459,7 @@ def is_banned_user(uid):
         return _banned.get(uid, False)
 
 # =========================================================
-# КЭШ И ЗАГРУЗКА (с персональным ключом для премиум)
+# КЭШ И ЗАГРУЗКА (с персональным кэшем для премиум)
 # =========================================================
 _raw = {}; _raw_lock = threading.Lock()
 _processed = {}; _processed_lock = threading.Lock()
@@ -498,9 +513,8 @@ def serve_vpn(user_id):
 def serve_obs(user_id):
     if is_banned_user(user_id): return '', 200
     if not is_premium_user(user_id):
-        return redirect(VPN_CONFIG_URL, code=302)
+        return "Premium required", 403
     try:
-        # персональный кэш по user_id
         content = get_processed(OBHOD_CONFIG_URL, PREMIUM_HEADERS, user_id)
         return Response(content, status=200, headers={"Content-Type": "text/plain; charset=utf-8", "profile-title": "CBN VPN Premium"})
     except:
@@ -512,7 +526,7 @@ def health():
 
 @app.route('/')
 def root():
-    return "CBN VPN v5.17", 200
+    return "CBN VPN v5.18", 200
 
 @app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
 def api_sp(uid, status):
@@ -552,5 +566,5 @@ def api_fc():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"CBN VPN v5.17 | Personal cache | Port {port}")
+    print(f"CBN VPN v5.18 | Full configs | Port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
