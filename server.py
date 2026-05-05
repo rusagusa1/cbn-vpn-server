@@ -1,12 +1,11 @@
 """
-CBN VPN Server - v5.18 FINAL
-- Оригинальная обработка имён (как в первой версии)
+CBN VPN Server - v5.19 (ALL configs preserved)
+- Сохраняются ВСЕ конфиги (без удаления дубликатов по base)
 - Поддержка всех протоколов (vless, vmess, trojan, ss, hysteria, hysteria2, tuic)
 - Игнорирование невалидных хостов (0.0.0.0)
 - Заголовки Standard / Premium
 - Персонализированный кэш для премиум-подписок (user_id)
 - При отсутствии премиума отдаётся 403 (без редиректа)
-- Без удаления дубликатов (все конфиги сохраняются)
 - Без семейного доступа, без фильтрации
 - Gzip-сжатие
 """
@@ -318,7 +317,7 @@ STANDARD_HEADERS = """#profile-title: CBN VPN Standard
 PREMIUM_HEADERS = """#profile-title: CBN VPN Premium
 #profile-update-interval: 2
 #support-url: https://t.me/CBN_VPN
-#announce: Премиум-подписка, предназначенная для обхода белых списков ("глушилок"). Использовать исключительно на мобильном интернете и только при белых списках.
+#announce: Премиум-подписка, предназначенная для обхода белых списков ("глушилок"). Использовать исклю��ительно на мобильном интернете и только при белых списках.
 """
 
 # =========================================================
@@ -381,7 +380,7 @@ def create_name(line, ping_map=None):
     return f"{base} · {transport}" if transport else base
 
 # =========================================================
-# ОБРАБОТКА КОНФИГОВ (поддержка vmess, игнор 0.0.0.0, без удаления дублей)
+# ОБРАБОТКА КОНФИГОВ (СОХРАНЯЕМ ВСЕ, БЕЗ УДАЛЕНИЯ ДУБЛИКАТОВ)
 # =========================================================
 def process_configs(raw, headers=""):
     try:
@@ -403,34 +402,28 @@ def process_configs(raw, headers=""):
                 continue
             configs.append(line)
 
-        # Строим имена и подсчитываем повторы для нумерации
+        # Сначала строим имена для всех конфигов (без удаления)
         name_counts = {}
-        config_list = []
+        config_names = []   # список кортежей (оригинальная строка, имя)
         for line in configs:
-            base = line[:line.rfind('#')] if '#' in line else line
-            if base not in [c[0] for c in config_list]:
-                name = create_name(line)
-                config_list.append((base, name))
-                name_counts[name] = name_counts.get(name, 0) + 1
+            name = create_name(line)
+            config_names.append((line, name))
+            name_counts[name] = name_counts.get(name, 0) + 1
 
+        # Генерируем результат с нумерацией, если имя повторяется
         result = []
         name_index = {}
-        for base, name in config_list:
+        for line, name in config_names:
             if name_counts[name] > 1:
                 name_index[name] = name_index.get(name, 0) + 1
                 display = f"{name} #{name_index[name]}"
             else:
                 display = name
-            # Ищем соответствующую строку в исходных конфигах
-            line = next((l for l in configs if (l[:l.rfind('#')] if '#' in l else l) == base), None)
-            if line:
-                # Заменяем комментарий в строке на наше красивое имя
-                if '#' in line:
-                    result.append(f"{line[:line.rfind('#')]}#{display}")
-                else:
-                    result.append(f"{line}#{display}")
+            # Заменяем старый комментарий на новый
+            if '#' in line:
+                result.append(f"{line[:line.rfind('#')]}#{display}")
             else:
-                result.append(f"{base}#{display}")
+                result.append(f"{line}#{display}")
 
         full_config = headers + '\n'.join(result)
         return full_config.encode('utf-8')
@@ -526,7 +519,7 @@ def health():
 
 @app.route('/')
 def root():
-    return "CBN VPN v5.18", 200
+    return "CBN VPN v5.19", 200
 
 @app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
 def api_sp(uid, status):
@@ -566,5 +559,5 @@ def api_fc():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"CBN VPN v5.18 | Full configs | Port {port}")
+    print(f"CBN VPN v5.19 | ALL configs | Port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
