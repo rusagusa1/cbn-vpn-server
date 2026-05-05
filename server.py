@@ -1,10 +1,11 @@
 """
-CBN VPN Server - v5.15 final
-- Чистые имена: "Страна Флаг [#N]"
-- Кастомные заголовки подписок (Standard / Premium)
+CBN VPN Server - v5.16 FULL
+- Оригинальные функции перевода имён (как в первом server.py)
+- Полный словарь стран и городов (~200 записей)
+- Заголовки Standard/Premium подписок
 - Игнорирование невалидных хостов (0.0.0.0)
-- Без семейного доступа
-- Gzip‑сжатие
+- Без семейного доступа, без фильтрации
+- Gzip-сжатие
 """
 
 import urllib.request
@@ -40,14 +41,14 @@ def compress_response(response):
 # URL И КЛЮЧИ
 # =========================================================
 VPN_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt"
-# Замените на новый URL премиум-конфигов
-OBHOD_CONFIG_URL = "https://raw.githubusercontent.com/ShadowException/VPN/refs/heads/main/configs/VPN-cat-top-100"   # <-- НОВЫЙ ИСТОЧНИК
+# Замените на актуальный URL премиум-конфигов
+OBHOD_CONFIG_URL = "https://raw.githubusercontent.com/ShadowException/VPN/refs/heads/main/configs/VPN-cat-top-100"
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
 
 # =========================================================
-# ПОЛНЫЙ СЛОВАРЬ СТРАН И ГОРОДОВ (как в исходной версии)
+# ПОЛНЫЙ СЛОВАРЬ СТРАН И ГОРОДОВ (из первого server.py)
 # =========================================================
 CITY_DATA = {
     # Страны
@@ -319,7 +320,7 @@ PREMIUM_HEADERS = """#profile-title: CBN VPN Premium
 """
 
 # =========================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ОРИГИНАЛЬНЫЕ ФУНКЦИИ ПЕРЕВОДА ИМЁН (из первого server.py)
 # =========================================================
 def clean_name(name):
     name = unquote(name)
@@ -338,25 +339,48 @@ def extract_name(line):
     if m: return clean_name(m.group(1))
     return ""
 
+def get_transport(line):
+    low = line.lower()
+    if 'grpc' in low: return 'GRPC'
+    if 'xhttp' in low: return 'XHTTP'
+    if 'ws' in low: return 'WS'
+    if 'reality' in low: return 'Reality'
+    if 'tcp' in low: return 'TCP'
+    return ''
+
+def is_anycast(line):
+    return 'anycast' in line.lower()
+
 def find_location(name):
     name_lower = name.lower().strip()
     for key in sorted(CITY_DATA.keys(), key=len, reverse=True):
         if key in name_lower:
             return CITY_DATA[key]
+    if 'united' in name_lower:
+        return ("США", "🇺🇸")
     words = [w for w in name_lower.split() if len(w) > 2]
     return (words[0].capitalize(), "") if words else (name[:15], "")
 
-def create_name(line):
+def create_name(line, ping_map=None):
     name = extract_name(line)
-    location, flag = find_location(name)
-    if flag:
-        return f"{location} {flag}"
-    return "🌍 Global"
+    transport = get_transport(line)
+    if is_anycast(line):
+        base = "🌍 Global"
+    else:
+        location, flag = find_location(name)
+        base = f"{location} {flag}".strip() if flag else location
+    if ping_map:
+        match = re.search(r'@([^:]+):', line)
+        if match:
+            host = match.group(1)
+            latency = ping_map.get(host)
+            if latency is not None:
+                base += f" · {latency:.0f}ms"
+    return f"{base} · {transport}" if transport else base
 
-def is_valid_host(host):
-    """Игнорируем явно невалидные адреса."""
-    return host not in ('0.0.0.0', '127.0.0.1', '')
-
+# =========================================================
+# ОБРАБОТКА КОНФИГОВ (оригинальная логика + фильтр 0.0.0.0)
+# =========================================================
 def process_configs(raw, headers=""):
     try:
         content = raw.decode('utf-8', errors='ignore')
@@ -366,35 +390,26 @@ def process_configs(raw, headers=""):
             line = line.strip()
             if not line or not line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'hysteria2://', 'tuic://')):
                 continue
-            # Извлекаем хост
+            # Игнорируем заведомо невалидные хосты
             match = re.search(r'@([^:]+):', line)
-            if match:
-                host = match.group(1)
-            else:
+            if not match:
                 match = re.search(r'://([^:]+):', line)
-                if match:
-                    host = match.group(1)
-                else:
-                    continue
-            if not is_valid_host(host):
+            if match and match.group(1) in ('0.0.0.0', '127.0.0.1', ''):
                 continue
             configs.append(line)
 
-        base_map = {}
+        name_counts = {}
+        config_list = []
         for line in configs:
             base = line[:line.rfind('#')] if '#' in line else line
-            if base not in base_map:
-                base_map[base] = create_name(line)
-
-        name_counts = {}
-        for name in base_map.values():
-            name_counts[name] = name_counts.get(name, 0) + 1
+            if base not in [c[0] for c in config_list]:
+                name = create_name(line)
+                config_list.append((base, name))
+                name_counts[name] = name_counts.get(name, 0) + 1
 
         result = []
         name_index = {}
-        for base in configs:
-            base_clean = base[:base.rfind('#')] if '#' in base else base
-            name = base_map[base_clean]
+        for base, name in config_list:
             if name_counts[name] > 1:
                 name_index[name] = name_index.get(name, 0) + 1
                 display = f"{name} #{name_index[name]}"
@@ -408,7 +423,7 @@ def process_configs(raw, headers=""):
         return raw
 
 # =========================================================
-# СОСТОЯНИЕ ПОЛЬЗОВАТЕЛЕЙ (без семейных)
+# СОСТОЯНИЕ ПОЛЬЗОВАТЕЛЕЙ
 # =========================================================
 _premium = {}; _banned = {}; _lock = threading.Lock()
 
@@ -496,7 +511,7 @@ def health():
 
 @app.route('/')
 def root():
-    return "CBN VPN v5.15", 200
+    return "CBN VPN v5.16", 200
 
 @app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
 def api_sp(uid, status):
@@ -525,7 +540,6 @@ def api_sync():
         _premium.clear(); _banned.clear()
         for uid in data.get('premium', []): _premium[int(uid)] = True
         for uid in data.get('banned', []): _banned[int(uid)] = True
-        # sub_accounts больше не используются
     return 'OK', 200
 
 @app.route('/flush_cache', methods=['POST'])
@@ -537,5 +551,5 @@ def api_fc():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"CBN VPN v5.15 | Clean names | Port {port}")
+    print(f"CBN VPN v5.16 FULL | Port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
