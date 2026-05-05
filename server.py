@@ -1,10 +1,10 @@
 """
-CBN VPN Server - v5.10 (legacy‑compatible)
+CBN VPN Server - v5.11
+- Чистые имена: "Страна Флаг [#N]" (без транспорта и пинга)
+- Порядковая нумерация серверов в одной локации
 - Фильтрация по локации (locs)
 - Семейный доступ (sub_accounts)
-- Gzip‑сжатие (встроенный модуль gzip, без flask-compress)
-- Кэширование реального пинга
-- Расширенный перевод стран/городов (~200 записей)
+- Gzip‑сжатие
 - Запуск: python server.py (порт из $PORT или 5000)
 """
 
@@ -12,8 +12,6 @@ import urllib.request
 import threading
 import time
 import re
-import subprocess
-import platform
 import os
 import gzip
 from datetime import datetime
@@ -23,16 +21,15 @@ from flask import Flask, request, Response, redirect
 app = Flask(__name__)
 
 # =========================================================
-# ВСТРОЕННОЕ GZIP-СЖАТИЕ (без flask-compress)
+# GZIP-СЖАТИЕ
 # =========================================================
 @app.after_request
 def compress_response(response):
-    """Сжимаем gzip, если клиент поддерживает."""
     if 'gzip' in request.headers.get('Accept-Encoding', '').lower():
         if response.direct_passthrough:
             return response
         content = response.get_data()
-        if len(content) < 500:  # маленькие ответы не сжимаем
+        if len(content) < 500:
             return response
         compressed = gzip.compress(content)
         response.set_data(compressed)
@@ -50,7 +47,7 @@ SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
 
 # =========================================================
-# ПОЛНЫЙ СЛОВАРЬ СТРАН И ГОРОДОВ (никаких сокращений)
+# ПОЛНЫЙ СЛОВАРЬ СТРАН И ГОРОДОВ
 # =========================================================
 CITY_DATA = {
     # Страны
@@ -307,73 +304,7 @@ CITY_DATA = {
 }
 
 # =========================================================
-# ПИНГ-КЭШ
-# =========================================================
-_ping_cache = {}
-_ping_lock = threading.Lock()
-PING_CACHE_TTL = 3600
-
-logger = None
-def init_logger():
-    global logger
-    import logging
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    logger = logging.getLogger("server")
-
-init_logger()
-
-def ping_host(host: str, timeout: float = 2.0) -> float | None:
-    try:
-        param = '-n' if platform.system().lower() == 'windows' else '-c'
-        cmd = ['ping', param, '1', '-W', str(int(timeout)), host]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 1)
-        if result.returncode == 0:
-            if platform.system().lower() == 'windows':
-                match = re.search(r'time[=<]\s*(\d+)ms', result.stdout)
-            else:
-                match = re.search(r'time[=<]\s*([\d.]+)\s*ms', result.stdout)
-            if match:
-                return float(match.group(1))
-    except:
-        pass
-    return None
-
-def extract_hosts_from_config(raw: bytes) -> list:
-    hosts = set()
-    content = raw.decode('utf-8', errors='ignore')
-    lines = content.split('\n')
-    for line in lines:
-        if not line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria://', 'hysteria2://', 'tuic://')):
-            continue
-        match = re.search(r'@([^:]+):', line)
-        if match:
-            hosts.add(match.group(1))
-        else:
-            match = re.search(r'://([^:]+):', line)
-            if match:
-                hosts.add(match.group(1))
-    return list(hosts)
-
-def update_ping_cache():
-    while True:
-        try:
-            raw = get_raw(VPN_CONFIG_URL)
-            hosts = extract_hosts_from_config(raw)
-            for host in hosts:
-                if host in ('0.0.0.0', '127.0.0.1') or not host:
-                    continue
-                latency = ping_host(host)
-                with _ping_lock:
-                    _ping_cache[host] = (latency, time.time())
-            if logger:
-                logger.info(f"Ping cache updated for {len(hosts)} hosts")
-        except Exception as e:
-            if logger:
-                logger.error(f"Ping update error: {e}")
-        time.sleep(PING_CACHE_TTL)
-
-# =========================================================
-# Вспомогательные функции
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # =========================================================
 def clean_name(name):
     name = unquote(name)
@@ -392,46 +323,23 @@ def extract_name(line):
     if m: return clean_name(m.group(1))
     return ""
 
-def get_transport(line):
-    low = line.lower()
-    if 'grpc' in low: return 'GRPC'
-    if 'xhttp' in low: return 'XHTTP'
-    if 'ws' in low: return 'WS'
-    if 'reality' in low: return 'Reality'
-    if 'tcp' in low: return 'TCP'
-    return ''
-
-def is_anycast(line):
-    return 'anycast' in line.lower()
-
 def find_location(name):
     name_lower = name.lower().strip()
     for key in sorted(CITY_DATA.keys(), key=len, reverse=True):
         if key in name_lower:
             return CITY_DATA[key]
-    if 'united' in name_lower:
-        return ("США", "🇺🇸")
     words = [w for w in name_lower.split() if len(w) > 2]
     return (words[0].capitalize(), "") if words else (name[:15], "")
 
-def create_name(line, ping_map: dict | None = None):
+def create_name(line):
+    """Генерирует чистое имя: 'Страна Флаг' (без транспорта и пинга)"""
     name = extract_name(line)
-    transport = get_transport(line)
-    if is_anycast(line):
-        base = "🌍 Global"
-    else:
-        location, flag = find_location(name)
-        base = f"{location} {flag}".strip() if flag else location
-    if ping_map:
-        match = re.search(r'@([^:]+):', line)
-        if match:
-            host = match.group(1)
-            latency = ping_map.get(host)
-            if latency is not None:
-                base += f" · {latency:.0f}ms"
-    return f"{base} · {transport}" if transport else base
+    location, flag = find_location(name)
+    if not flag and location == "🌍 Global":
+        return "🌍 Global"
+    return f"{location} {flag}".strip()
 
-def process_configs(raw, filter_locations: list | None = None, ping_map: dict | None = None):
+def process_configs(raw, filter_locations=None):
     try:
         content = raw.decode('utf-8', errors='ignore')
         lines = content.split('\n')
@@ -445,18 +353,24 @@ def process_configs(raw, filter_locations: list | None = None, ping_map: dict | 
                     filtered.append(line)
             configs = filtered
 
-        name_counts = {}
-        config_list = []
+        # Сборка баз и подсчет одинаковых имён для нумерации
+        base_map = {}
         for line in configs:
             base = line[:line.rfind('#')] if '#' in line else line
-            if base not in [c[0] for c in config_list]:
-                name = create_name(line, ping_map)
-                config_list.append((base, name))
-                name_counts[name] = name_counts.get(name, 0) + 1
+            if base not in base_map:
+                name = create_name(line)
+                base_map[base] = name
+
+        # Подсчёт повторов имён
+        name_counts = {}
+        for name in base_map.values():
+            name_counts[name] = name_counts.get(name, 0) + 1
 
         result = []
         name_index = {}
-        for base, name in config_list:
+        for base in configs:
+            base_clean = base[:base.rfind('#')] if '#' in base else base
+            name = base_map[base_clean]
             if name_counts[name] > 1:
                 name_index[name] = name_index.get(name, 0) + 1
                 display = f"{name} #{name_index[name]}"
@@ -468,7 +382,7 @@ def process_configs(raw, filter_locations: list | None = None, ping_map: dict | 
         return raw
 
 # =========================================================
-# Состояние пользователей (с sub_accounts)
+# СОСТОЯНИЕ ПОЛЬЗОВАТЕЛЕЙ
 # =========================================================
 _premium = {}; _banned = {}; _lock = threading.Lock()
 _sub_accounts = {}
@@ -497,14 +411,8 @@ def is_banned_user(uid):
                 return True
         return False
 
-def set_sub_accounts(data: dict):
-    with _lock:
-        _sub_accounts.clear()
-        for parent_id, children in data.items():
-            _sub_accounts[int(parent_id)] = set(children)
-
 # =========================================================
-# Кэш
+# КЭШ И ЗАГРУЗКА
 # =========================================================
 _raw = {}; _raw_lock = threading.Lock()
 _processed = {}; _processed_lock = threading.Lock()
@@ -520,22 +428,20 @@ def get_raw(url):
     return data
 
 def get_processed(url, filter_locations=None):
-    ping_map = {}
-    with _ping_lock:
-        for host, (lat, ts) in _ping_cache.items():
-            if lat is not None and time.time() - ts < PING_CACHE_TTL:
-                ping_map[host] = lat
     with _processed_lock:
         cache_key = url + (str(sorted(filter_locations)) if filter_locations else "")
         if cache_key in _processed:
             data, ts = _processed[cache_key]
             if time.time() - ts < CACHE_TTL: return data
     raw = get_raw(url)
-    processed = process_configs(raw, filter_locations, ping_map)
+    processed = process_configs(raw, filter_locations)
     with _processed_lock:
         _processed[cache_key] = (processed, time.time())
     return processed
 
+# =========================================================
+# KEEP ALIVE
+# =========================================================
 def keep_alive():
     while True:
         time.sleep(600)
@@ -543,11 +449,9 @@ def keep_alive():
         except: pass
 
 threading.Thread(target=keep_alive, daemon=True).start()
-# update_ping_cache отключён - блокирует Flask при большом количестве хостов
-# threading.Thread(target=update_ping_cache, daemon=True).start()
 
 # =========================================================
-# Маршруты
+# МАРШРУТЫ
 # =========================================================
 @app.route('/<int:user_id>')
 def serve_vpn(user_id):
@@ -561,7 +465,7 @@ def serve_vpn(user_id):
 @app.route('/<int:user_id>/obs')
 def serve_obs(user_id):
     if is_banned_user(user_id): return '', 200
-    if not is_premium_user(user_id): return redirect(VPN_CONFIG_URL, code=302)
+    if not is_premium_user(user_id): return redirect(OBHOD_CONFIG_URL, code=302)
     try:
         content = get_processed(OBHOD_CONFIG_URL)
         return Response(content, status=200, headers={"Content-Type": "text/plain; charset=utf-8", "profile-title": "CBN VPN Premium"})
@@ -584,16 +488,15 @@ def serve_filter(user_id):
 def serve_child(parent_id, child_id):
     if is_banned_user(parent_id) or not is_premium_user(parent_id):
         return '', 200
-    # child_id наследует доступ от parent_id
     return serve_vpn(child_id)
 
 @app.route('/health')
 def health():
-    return {"status": "ok", "ping_cache": len(_ping_cache)}, 200
+    return {"status": "ok"}, 200
 
 @app.route('/')
 def root():
-    return "CBN VPN v5.10", 200
+    return "CBN VPN v5.11", 200
 
 @app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
 def api_sp(uid, status):
@@ -622,11 +525,9 @@ def api_sync():
         _premium.clear(); _banned.clear()
         for uid in data.get('premium', []): _premium[int(uid)] = True
         for uid in data.get('banned', []): _banned[int(uid)] = True
-        if 'sub_accounts' in data:
-            # Обновляем sub_accounts напрямую (без повторного захвата _lock)
-            _sub_accounts.clear()
-            for parent_id, children in data['sub_accounts'].items():
-                _sub_accounts[int(parent_id)] = set(children)
+        _sub_accounts.clear()
+        for parent_id, children in data.get('sub_accounts', {}).items():
+            _sub_accounts[int(parent_id)] = set(children)
     return 'OK', 200
 
 @app.route('/flush_cache', methods=['POST'])
@@ -638,5 +539,5 @@ def api_fc():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"CBN VPN v5.10 | Legacy | Port {port}")
+    print(f"CBN VPN v5.11 | Clean names | Port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
