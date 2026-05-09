@@ -1,13 +1,14 @@
 """
-CBN VPN Server - v5.20 FINAL
-- Поддержка всех протоколов, включая ssr://
-- Сохраняются ВСЕ конфиги (без удаления дубликатов)
-- Игнорирование невалидных хостов (0.0.0.0)
-- Заголовки Standard / Premium (исправлен текст Premium)
-- Персонализированный кэш для премиум-подписок (user_id)
-- При отсутствии премиума отдаётся 403 (без редиректа)
-- Без семейного доступа, без фильтрации
-- Gzip-сжатие
+CBN VPN Server - v6.0 FINAL
+- Новый премиум-источник (vless_lite.txt)
+- Исправлен тип транспорта (XHTTP, SplitHTTP и др.)
+- Убрана скорость из имён конфигов
+- Перевод по домену для безымянных конфигов
+- Игнорирование 0.0.0.0
+- Заголовки подписок
+- Персональный кэш для премиум
+- 403 при отсутствии премиума
+- Без семейных, без фильтрации
 """
 
 import urllib.request
@@ -22,9 +23,7 @@ from flask import Flask, request, Response, redirect
 
 app = Flask(__name__)
 
-# =========================================================
-# GZIP-СЖАТИЕ
-# =========================================================
+# GZIP
 @app.after_request
 def compress_response(response):
     if 'gzip' in request.headers.get('Accept-Encoding', '').lower():
@@ -39,18 +38,14 @@ def compress_response(response):
         response.headers['Content-Length'] = str(len(compressed))
     return response
 
-# =========================================================
-# URL И КЛЮЧИ
-# =========================================================
+# URL
 VPN_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt"
-OBHOD_CONFIG_URL = "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt"
+OBHOD_CONFIG_URL = "https://raw.githubusercontent.com/zieng2/wl/main/vless_lite.txt"   # новый
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
 
-# =========================================================
-# ПОЛНЫЙ СЛОВАРЬ СТРАН И ГОРОДОВ (из первой версии)
-# =========================================================
+# СЛОВАРЬ СТРАН И ГОРОДОВ (полный)
 CITY_DATA = {
     # Страны
     "afghanistan": ("Афганистан", "🇦🇫"),
@@ -305,9 +300,7 @@ CITY_DATA = {
     "zurich": ("Цюрих", "🇨🇭"),
 }
 
-# =========================================================
-# ЗАГОЛОВКИ ПОДПИСОК (текст Premium исправлен)
-# =========================================================
+# ЗАГОЛОВКИ ПОДПИСОК
 STANDARD_HEADERS = """#profile-title: CBN VPN Standard
 #profile-update-interval: 2
 #support-url: https://t.me/CBN_VPN
@@ -320,9 +313,7 @@ PREMIUM_HEADERS = """#profile-title: CBN VPN Premium
 #announce: Премиум-подписка, предназначенная для обхода белых списков ("глушилок"). Использовать исключительно на мобильном интернете и только при белых списках.
 """
 
-# =========================================================
-# ОРИГИНАЛЬНЫЕ ФУНКЦИИ ПЕРЕВОДА ИМЁН (из первого server.py)
-# =========================================================
+# ФУНКЦИИ ОБРАБОТКИ ИМЁН
 def clean_name(name):
     name = unquote(name)
     name = re.sub(r'[^\x00-\x7F\u0400-\u04FFa-zA-Z\s]', '', name)
@@ -332,6 +323,9 @@ def clean_name(name):
     name = re.sub(r'\bf\d+\b', '', name)
     name = re.sub(r'\b[a-z]{1,2}\b', '', name, flags=re.IGNORECASE)
     name = name.replace('|', ' ').replace('-', ' ')
+    # убираем "Speed" или "ms" с числами
+    name = re.sub(r'\b\d+ms\b', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'\bSpeed\b', '', name, flags=re.IGNORECASE)
     name = re.sub(r'\s+', ' ', name).strip()
     return name
 
@@ -342,11 +336,12 @@ def extract_name(line):
 
 def get_transport(line):
     low = line.lower()
-    if 'grpc' in low: return 'GRPC'
     if 'xhttp' in low: return 'XHTTP'
+    if 'grpc' in low: return 'gRPC'
     if 'ws' in low: return 'WS'
     if 'reality' in low: return 'Reality'
     if 'tcp' in low: return 'TCP'
+    if 'splithttp' in low: return 'SplitHTTP'
     return ''
 
 def is_anycast(line):
@@ -358,30 +353,51 @@ def find_location(name):
         if key in name_lower:
             return CITY_DATA[key]
     if 'united' in name_lower:
-        return ("США", "🇺🇸")
+        return CITY_DATA.get("united states", ("США", "🇺🇸"))
     words = [w for w in name_lower.split() if len(w) > 2]
     return (words[0].capitalize(), "") if words else (name[:15], "")
 
-def create_name(line, ping_map=None):
+def find_location_by_domain(line):
+    """Пытаемся определить локацию по домену, если имя не дало результата."""
+    match = re.search(r'@([^:]+):', line)
+    if not match:
+        match = re.search(r'://([^:]+):', line)
+    if match:
+        host = match.group(1)
+        host_lower = host.lower()
+        # Ищем ключи CITY_DATA в домене
+        for key in sorted(CITY_DATA.keys(), key=len, reverse=True):
+            if key in host_lower:
+                return CITY_DATA[key]
+        # Проверка на коды стран (например, .nl, .de)
+        country_codes = {
+            'nl': 'netherlands', 'de': 'germany', 'us': 'usa', 'uk': 'uk',
+            'ru': 'russia', 'fr': 'france', 'jp': 'japan', 'kr': 'south korea',
+            'tr': 'turkey', 'ca': 'canada', 'au': 'australia', 'es': 'spain',
+            'it': 'italy', 'pl': 'poland', 'ua': 'ukraine'
+        }
+        for code, country in country_codes.items():
+            if f'.{code}' in host_lower:
+                return CITY_DATA.get(country, ("", ""))
+    return None
+
+def create_name(line):
     name = extract_name(line)
     transport = get_transport(line)
     if is_anycast(line):
         base = "🌍 Global"
     else:
         location, flag = find_location(name)
+        if not flag:
+            # Пробуем определить по домену
+            loc_info = find_location_by_domain(line)
+            if loc_info:
+                location, flag = loc_info
+            else:
+                location, flag = name or "Unknown", ""
         base = f"{location} {flag}".strip() if flag else location
-    if ping_map:
-        match = re.search(r'@([^:]+):', line)
-        if match:
-            host = match.group(1)
-            latency = ping_map.get(host)
-            if latency is not None:
-                base += f" · {latency:.0f}ms"
     return f"{base} · {transport}" if transport else base
 
-# =========================================================
-# ОБРАБОТКА КОНФИГОВ (поддержка ssr://, сохраняем все)
-# =========================================================
 def process_configs(raw, headers=""):
     try:
         content = raw.decode('utf-8', errors='ignore')
@@ -389,13 +405,11 @@ def process_configs(raw, headers=""):
         configs = []
         for line in lines:
             line = line.strip()
-            # Пропускаем строки с заголовками
             if line.startswith('#'):
                 continue
-            # Принимаем все известные протоколы, включая ssr://
             if not line or not line.startswith(('vless://', 'vmess://', 'trojan://', 'ss://', 'ssr://', 'hysteria://', 'hysteria2://', 'tuic://')):
                 continue
-            # Игнорируем невалидные хосты
+            # Фильтруем невалидные IP
             match = re.search(r'@([^:]+):', line)
             if not match:
                 match = re.search(r'://([^:]+):', line)
@@ -403,7 +417,7 @@ def process_configs(raw, headers=""):
                 continue
             configs.append(line)
 
-        # Строим имена для всех конфигов (без удаления)
+        # Генерируем имена для всех конфигов
         name_counts = {}
         config_names = []
         for line in configs:
@@ -411,7 +425,6 @@ def process_configs(raw, headers=""):
             config_names.append((line, name))
             name_counts[name] = name_counts.get(name, 0) + 1
 
-        # Генерируем результат с нумерацией
         result = []
         name_index = {}
         for line, name in config_names:
@@ -420,7 +433,7 @@ def process_configs(raw, headers=""):
                 display = f"{name} #{name_index[name]}"
             else:
                 display = name
-            # Заменяем старый комментарий на новый
+            # Заменяем комментарий
             if '#' in line:
                 result.append(f"{line[:line.rfind('#')]}#{display}")
             else:
@@ -431,9 +444,7 @@ def process_configs(raw, headers=""):
     except:
         return raw
 
-# =========================================================
 # СОСТОЯНИЕ ПОЛЬЗОВАТЕЛЕЙ
-# =========================================================
 _premium = {}; _banned = {}; _lock = threading.Lock()
 
 def set_premium(uid, s):
@@ -452,9 +463,7 @@ def is_banned_user(uid):
     with _lock:
         return _banned.get(uid, False)
 
-# =========================================================
-# КЭШ И ЗАГРУЗКА (с персональным кэшем для премиум)
-# =========================================================
+# КЭШ
 _raw = {}; _raw_lock = threading.Lock()
 _processed = {}; _processed_lock = threading.Lock()
 
@@ -480,9 +489,7 @@ def get_processed(url, headers="", user_id=None):
         _processed[cache_key] = (processed, time.time())
     return processed
 
-# =========================================================
 # KEEP ALIVE
-# =========================================================
 def keep_alive():
     while True:
         time.sleep(600)
@@ -491,9 +498,7 @@ def keep_alive():
 
 threading.Thread(target=keep_alive, daemon=True).start()
 
-# =========================================================
 # МАРШРУТЫ
-# =========================================================
 @app.route('/<int:user_id>')
 def serve_vpn(user_id):
     if is_banned_user(user_id): return '', 200
@@ -520,7 +525,7 @@ def health():
 
 @app.route('/')
 def root():
-    return "CBN VPN v5.20", 200
+    return "CBN VPN v6.0", 200
 
 @app.route('/set_premium/<int:uid>/<int:status>', methods=['POST'])
 def api_sp(uid, status):
@@ -560,5 +565,5 @@ def api_fc():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"CBN VPN v5.20 | ssr support | Port {port}")
+    print(f"CBN VPN v6.0 | port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
