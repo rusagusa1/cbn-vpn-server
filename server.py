@@ -40,7 +40,7 @@ def compress_response(response):
 
 # URL
 VPN_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt"
-OBHOD_CONFIG_URL = "https://gist.githubusercontent.com/joseph89qw/be3ee9ad90aa5f0c59fcdc41ad78a748/raw/fd92afc5cdd31dfb8280a30d5eaaf27edde949e7/LTE"   # новый
+OBHOD_CONFIG_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt"   # новый
 RENDER_URL = "https://cbn-vpn-server.onrender.com/"
 SECRET_KEY = "cbn_secret_2026"
 CACHE_TTL = 900
